@@ -1,4 +1,3 @@
-from docx2pdf import convert
 import streamlit as st
 import os
 from datetime import datetime
@@ -12,12 +11,12 @@ import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
 import getpass
-import shutil
 
-# Carrega variáveis de ambiente
+# Carrega variáveis de ambiente do .env
 load_dotenv()
 
-CAMINHO_BASE = r"M:\LUCAS\checklist"
+CAMINHO_BASE = "checklists_salvos"  # Use uma pasta local
+os.makedirs(CAMINHO_BASE, exist_ok=True)
 
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
 st.title("Checklist de Caminhão")
@@ -38,7 +37,6 @@ if st.session_state.etapa == 1:
     st.session_state.dados['PLACA_CARRETA1'] = st.text_input("Placa Carreta 1", max_chars=8)
     st.session_state.dados['PLACA_CARRETA2'] = st.text_input("Placa Carreta 2", max_chars=8)
 
-    # Obter nome completo do usuário logado (ajustável)
     try:
         from ctypes import windll, create_unicode_buffer
         buffer = create_unicode_buffer(1024)
@@ -53,20 +51,24 @@ if st.session_state.etapa == 1:
 
     if tipo_veiculo == "CAVALO":
         subtipo = st.radio("Configuração do Cavalo", ["TOCO 4X2", "TRUCADO 6X2", "TRAÇADO 6X4"])
-        st.session_state.dados["CAVALO_TOCO"] = "X" if subtipo == "TOCO 4X2" else ""
-        st.session_state.dados["CAVALO_TRUCADO"] = "X" if subtipo == "TRUCADO 6X2" else ""
-        st.session_state.dados["CAVALO_TRACADO"] = "X" if subtipo == "TRAÇADO 6X4" else ""
-        st.session_state.dados["RIGIDO_TOCO"] = ""
-        st.session_state.dados["RIGIDO_TRUCADO"] = ""
-        st.session_state.dados["RIGIDO_TRACADO"] = ""
+        st.session_state.dados.update({
+            "CAVALO_TOCO": "X" if subtipo == "TOCO 4X2" else "",
+            "CAVALO_TRUCADO": "X" if subtipo == "TRUCADO 6X2" else "",
+            "CAVALO_TRACADO": "X" if subtipo == "TRAÇADO 6X4" else "",
+            "RIGIDO_TOCO": "",
+            "RIGIDO_TRUCADO": "",
+            "RIGIDO_TRACADO": "",
+        })
     else:
         subtipo = st.radio("Configuração do Rígido", ["TOCO 4X2", "TRUCADO 6X2", "TRAÇADO 6X4"])
-        st.session_state.dados["RIGIDO_TOCO"] = "X" if subtipo == "TOCO 4X2" else ""
-        st.session_state.dados["RIGIDO_TRUCADO"] = "X" if subtipo == "TRUCADO 6X2" else ""
-        st.session_state.dados["RIGIDO_TRACADO"] = "X" if subtipo == "TRAÇADO 6X4" else ""
-        st.session_state.dados["CAVALO_TOCO"] = ""
-        st.session_state.dados["CAVALO_TRUCADO"] = ""
-        st.session_state.dados["CAVALO_TRACADO"] = ""
+        st.session_state.dados.update({
+            "RIGIDO_TOCO": "X" if subtipo == "TOCO 4X2" else "",
+            "RIGIDO_TRUCADO": "X" if subtipo == "TRUCADO 6X2" else "",
+            "RIGIDO_TRACADO": "X" if subtipo == "TRAÇADO 6X4" else "",
+            "CAVALO_TOCO": "",
+            "CAVALO_TRUCADO": "",
+            "CAVALO_TRACADO": "",
+        })
 
     tipo_carreta = st.radio("CARRETA", ["2 EIXOS", "3 EIXOS"])
     st.session_state.dados["CARRETA_2"] = "X" if tipo_carreta == "2 EIXOS" else ""
@@ -131,7 +133,6 @@ elif st.session_state.etapa == 3:
         caminho_pasta = os.path.join(CAMINHO_BASE, nome_pasta)
         os.makedirs(caminho_pasta, exist_ok=True)
 
-        # Preenche o Word
         doc = Document("Checklist_Preenchivel.docx")
 
         for p in doc.paragraphs:
@@ -155,27 +156,17 @@ elif st.session_state.etapa == 3:
                                     inline[i].text = ""
                                 inline[0].text = full_text
 
-        temp_docx_path = os.path.join(caminho_pasta, "~temp.docx")
-        caminho_pdf = os.path.join(caminho_pasta, "Checklist_Final.pdf")
+        caminho_docx_final = os.path.join(caminho_pasta, "Checklist_Preenchido.docx")
+        doc.save(caminho_docx_final)
 
-        if os.path.exists(temp_docx_path):
-            os.remove(temp_docx_path)
-
-        doc.save(temp_docx_path)
-        convert(temp_docx_path, caminho_pdf)
-        os.remove(temp_docx_path)
-
-        # Copiar imagens para a pasta
         for i, imagem in enumerate(st.session_state.imagens):
-            nome_img = f"foto_{i+1}.jpg"
-            caminho_img = os.path.join(caminho_pasta, nome_img)
+            caminho_img = os.path.join(caminho_pasta, f"foto_{i+1}.jpg")
             with open(caminho_img, "wb") as f:
                 f.write(imagem.getbuffer())
 
-        def adicionar_fotos(pdf_base, imagens, saida):
+        def adicionar_fotos(saida):
             merger = PdfMerger()
-            merger.append(pdf_base)
-            for img in imagens:
+            for img in st.session_state.imagens:
                 packet = BytesIO()
                 can = canvas.Canvas(packet, pagesize=A4)
                 can.drawImage(ImageReader(img), 50, 150, width=500, preserveAspectRatio=True, mask='auto')
@@ -187,23 +178,6 @@ elif st.session_state.etapa == 3:
             merger.close()
 
         caminho_pdf_final = os.path.join(caminho_pasta, "Checklist_Completo.pdf")
-        adicionar_fotos(caminho_pdf, st.session_state.imagens, caminho_pdf_final)
-        os.remove(caminho_pdf)
+        adicionar_fotos(caminho_pdf_final)
 
-        try:
-            msg = EmailMessage()
-            msg['Subject'] = f"Checklist - {st.session_state.dados['PLACA_CAMINHAO']}"
-            msg['From'] = "lucas.alves@transmaroni.com.br"
-            msg['To'] = "lucas.alves@transmaroni.com.br"
-            msg.set_content("Checklist gerado em anexo.")
-            with open(caminho_pdf_final, 'rb') as f:
-                msg.add_attachment(f.read(), maintype='application', subtype='pdf', filename=os.path.basename(caminho_pdf_final))
-
-            with smtplib.SMTP("smtp.office365.com", 587) as smtp:
-                smtp.starttls()
-                smtp.login("lucas.alves@transmaroni.com.br", os.environ['EMAIL_SENHA'])
-                smtp.send_message(msg)
-        except Exception as e:
-            st.error(f"Erro ao enviar email: {e}")
-
-        st.success("Checklist finalizado com sucesso!")
+        st.success("Checklist finalizado com sucesso! Arquivos salvos com sucesso.")
