@@ -17,7 +17,7 @@ import shutil
 # Carrega variáveis de ambiente
 load_dotenv()
 
-CAMINHO_BASE = r"M:\LUCAS\Projetos-Python\Projeto - CheckList"
+CAMINHO_BASE = r"M:\LUCAS\checklist"
 
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
 st.title("Checklist de Caminhão")
