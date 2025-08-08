@@ -2,38 +2,69 @@ import streamlit as st
 import os
 from datetime import datetime
 from docx import Document
-from PyPDF2 import PdfMerger, PdfReader
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.utils import ImageReader
 from io import BytesIO
 import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
 import getpass
 
-# Carrega variáveis de ambiente do .env
+# Carregar variáveis do .env
 load_dotenv()
 
-CAMINHO_BASE = "checklists_salvos"  # Use uma pasta local
-os.makedirs(CAMINHO_BASE, exist_ok=True)
-
+# Configuração de página
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
-st.title("Checklist de Caminhão")
+st.title("🚚 Checklist de Caminhão")
 
-if 'etapa' not in st.session_state:
+# Estados da aplicação
+if "etapa" not in st.session_state:
     st.session_state.etapa = 1
-if 'dados' not in st.session_state:
+if "dados" not in st.session_state:
     st.session_state.dados = {}
-if 'imagens' not in st.session_state:
+if "imagens" not in st.session_state:
     st.session_state.imagens = []
+
+# Função para enviar e-mail com anexos
+def enviar_email(arquivo_word, arquivo_pdf):
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = f"Checklist - {st.session_state.dados['PLACA_CAMINHAO']}"
+        msg["From"] = os.getenv("EMAIL_USER")
+        msg["To"] = os.getenv("EMAIL_DESTINO")
+        msg.set_content("Segue em anexo o checklist finalizado.")
+
+        # Anexa Word
+        msg.add_attachment(
+            arquivo_word.getvalue(),
+            maintype="application",
+            subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename="Checklist_Preenchido.docx"
+        )
+        # Anexa PDF
+        msg.add_attachment(
+            arquivo_pdf.getvalue(),
+            maintype="application",
+            subtype="pdf",
+            filename="Checklist_Final.pdf"
+        )
+
+        with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
+            smtp.starttls()
+            smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
+            smtp.send_message(msg)
+
+        return True
+    except Exception as e:
+        st.error(f"Erro ao enviar e-mail: {e}")
+        return False
 
 # Etapa 1
 if st.session_state.etapa == 1:
     st.subheader("Etapa 1: Dados Básicos")
-    st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8)
-    st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual")
-    st.session_state.dados['MOTORISTA'] = st.text_input("Motorista")
+    st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8, placeholder="ABC1234")
+    st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual", placeholder="Ex: 120000")
+    st.session_state.dados['MOTORISTA'] = st.text_input("Motorista", placeholder="Nome completo")
     st.session_state.dados['PLACA_CARRETA1'] = st.text_input("Placa Carreta 1", max_chars=8)
     st.session_state.dados['PLACA_CARRETA2'] = st.text_input("Placa Carreta 2", max_chars=8)
 
@@ -44,11 +75,9 @@ if st.session_state.etapa == 1:
         nome_completo = buffer.value
     except:
         nome_completo = getpass.getuser()
-
     st.session_state.dados['VISTORIADOR'] = nome_completo
 
     tipo_veiculo = st.radio("Tipo de veículo", ["CAVALO", "RÍGIDO"])
-
     if tipo_veiculo == "CAVALO":
         subtipo = st.radio("Configuração do Cavalo", ["TOCO 4X2", "TRUCADO 6X2", "TRAÇADO 6X4"])
         st.session_state.dados.update({
@@ -70,11 +99,11 @@ if st.session_state.etapa == 1:
             "CAVALO_TRACADO": "",
         })
 
-    tipo_carreta = st.radio("CARRETA", ["2 EIXOS", "3 EIXOS"])
+    tipo_carreta = st.radio("Carreta", ["2 EIXOS", "3 EIXOS"])
     st.session_state.dados["CARRETA_2"] = "X" if tipo_carreta == "2 EIXOS" else ""
     st.session_state.dados["CARRETA_3"] = "X" if tipo_carreta == "3 EIXOS" else ""
 
-    if st.button("Avançar para Etapa 2"):
+    if st.button("Avançar ➡️"):
         if all([
             st.session_state.dados['PLACA_CAMINHAO'],
             st.session_state.dados['KM_ATUAL'],
@@ -92,10 +121,9 @@ if st.session_state.etapa == 1:
 elif st.session_state.etapa == 2:
     st.subheader("Etapa 2: Inserção de Fotos")
     imagens = st.file_uploader("Envie ao menos 4 fotos", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
-
     if imagens and len(imagens) >= 4:
         st.session_state.imagens = imagens
-        if st.button("Avançar para Etapa 3"):
+        if st.button("Avançar ➡️"):
             st.session_state.etapa = 3
     else:
         st.warning("Envie no mínimo 4 imagens.")
@@ -103,7 +131,6 @@ elif st.session_state.etapa == 2:
 # Etapa 3
 elif st.session_state.etapa == 3:
     st.subheader("Etapa 3: Checklist Técnico")
-
     checklist_itens = {
         "VAZAMENTO_OLEO_MOTOR": st.checkbox("Vazamento de óleo motor"),
         "VAZAMENTO_AGUA_MOTOR": st.checkbox("Vazamento de água motor"),
@@ -122,50 +149,32 @@ elif st.session_state.etapa == 3:
         "TACOGRAFO_OK": st.checkbox("Funcionamento tacógrafo"),
         "FUNILARIA_OK": st.checkbox("Itens para funilaria"),
     }
-
     observacao = st.text_area("Observações")
 
-    if st.button("Finalizar Checklist"):
+    if st.button("✅ Finalizar Checklist"):
         st.session_state.dados.update({k: "OK" if v else "NÃO OK" for k, v in checklist_itens.items()})
         st.session_state.dados['OBSERVACOES'] = observacao
 
-        nome_pasta = f"{st.session_state.dados['PLACA_CAMINHAO']} - {datetime.now().strftime('%d.%m.%Y')}"
-        caminho_pasta = os.path.join(CAMINHO_BASE, nome_pasta)
-        os.makedirs(caminho_pasta, exist_ok=True)
-
+        # Gerar Word em memória
         doc = Document("Checklist_Preenchivel.docx")
-
         for p in doc.paragraphs:
-            inline = p.runs
             for k, v in st.session_state.dados.items():
                 if f"{{{{{k}}}}}" in p.text:
-                    full_text = p.text.replace(f"{{{{{k}}}}}", str(v))
-                    for i in range(len(inline)):
-                        inline[i].text = ""
-                    inline[0].text = full_text
-
+                    p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for p in cell.paragraphs:
-                        inline = p.runs
                         for k, v in st.session_state.dados.items():
                             if f"{{{{{k}}}}}" in p.text:
-                                full_text = p.text.replace(f"{{{{{k}}}}}", str(v))
-                                for i in range(len(inline)):
-                                    inline[i].text = ""
-                                inline[0].text = full_text
+                                p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
+        buffer_word = BytesIO()
+        doc.save(buffer_word)
+        buffer_word.seek(0)
 
-        caminho_docx_final = os.path.join(caminho_pasta, "Checklist_Preenchido.docx")
-        doc.save(caminho_docx_final)
-
-        for i, imagem in enumerate(st.session_state.imagens):
-            caminho_img = os.path.join(caminho_pasta, f"foto_{i+1}.jpg")
-            with open(caminho_img, "wb") as f:
-                f.write(imagem.getbuffer())
-
-        caminho_pdf = os.path.join(caminho_pasta, "Checklist_Final.pdf")
-        c = canvas.Canvas(caminho_pdf, pagesize=A4)
+        # Gerar PDF em memória
+        buffer_pdf = BytesIO()
+        c = canvas.Canvas(buffer_pdf, pagesize=A4)
         text = c.beginText(40, 800)
         text.setFont("Helvetica", 12)
         for chave, valor in st.session_state.dados.items():
@@ -173,5 +182,12 @@ elif st.session_state.etapa == 3:
         c.drawText(text)
         c.showPage()
         c.save()
+        buffer_pdf.seek(0)
 
-        st.success("Checklist finalizado com sucesso! Arquivos salvos com sucesso.")
+        # Enviar por e-mail
+        if enviar_email(buffer_word, buffer_pdf):
+            st.success("Checklist enviado por e-mail com sucesso!")
+
+        # Disponibilizar para download
+        st.download_button("📄 Baixar Word", buffer_word, file_name="Checklist_Preenchido.docx")
+        st.download_button("📄 Baixar PDF", buffer_pdf, file_name="Checklist_Final.pdf")
