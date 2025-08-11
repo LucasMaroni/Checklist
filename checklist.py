@@ -18,7 +18,7 @@ load_dotenv()
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
 col_esq, col_dir = st.columns([4, 1])
 with col_dir:
-    st.image("logo.jpg", width=100)  # Aqui define largura fixa de 150 pixels
+    st.image("logo.png", width=100)  # Aqui define largura fixa de 150 pixels
 st.title("🚚 CheckList Manutenção")
 
 
