@@ -13,9 +13,14 @@ import getpass
 # Carregar variáveis de ambiente
 load_dotenv()
 
+
 # Configuração da página
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
+col_esq, col_dir = st.columns([4, 1])
+with col_dir:
+    st.image("logo.jpg", width=100)  # Aqui define largura fixa de 150 pixels
 st.title("🚚 CheckList Manutenção")
+
 
 # Estados
 if "etapa" not in st.session_state:
@@ -71,7 +76,7 @@ def enviar_email(arquivo_word, arquivo_pdf, fotos_extra):
 # ETAPA 1
 # -----------------
 if st.session_state.etapa == 1:
-    st.subheader("Etapa 1: Dados Básicos")
+    st.subheader("Dados do Veículo e Condutor")
     st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8)
     st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual")
     st.session_state.dados['MOTORISTA'] = st.text_input("Motorista")
@@ -144,7 +149,7 @@ if st.session_state.etapa == 1:
 # ETAPA 2
 # -----------------
 elif st.session_state.etapa == 2:
-    st.subheader("Etapa 2: Inserção de Fotos")
+    st.subheader("Inserção das Imagens.")
     st.image("Checklist.png", caption="Exemplo dos ângulos corretos para as fotos", use_container_width=True)   
     
     imagens = st.file_uploader("Envie ao menos 4 fotos", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
@@ -156,88 +161,105 @@ elif st.session_state.etapa == 2:
         st.warning("Envie no mínimo 4 imagens.")
 
 # -----------------
-# ETAPA 3
+# -----------------
+# -----------------
+# -----------------
 # -----------------
 elif st.session_state.etapa == 3:
-    st.subheader("Etapa 3: Checklist Técnico")
+    import time  # usado apenas para breve atraso visual antes do rerun
 
+    st.subheader("Etapa 3: Checklist")
     checklist_itens = {
-    "ARREFECIMENTO_OK": "Nível do líquido de arrefecimento",
-    "OLEO_MOTOR_OK": "Nível de óleo de motor",
-    "VAZAMENTO_OLEO_MOTOR": "Vazamento de óleo motor",
-    "VAZAMENTO_AGUA_MOTOR": "Vazamento de água motor",
-    "OLEO_CAMBIO_OK": "Vazamento de óleo câmbio",
-    "OLEO_DIFERENCIAL_OK": "Vazamento de óleo diferencial",
-    "OLEO_CUBOS_OK": "Vazamento de óleo cubos",
-    "DIESEL_OK": "Vazamento de diesel",
-    "GNV_OK": "Vazamento de GNV",
-    "VAZAMENTO_AR_OK": "Vazamento de ar",
-    "PNEUS_OK": "Pneus avariados",
-    "FAIXAS_REFLETIVAS_OK": "Faixas refletivas",
-    "FUNILARIA_OK": "Itens avariados para funilaria",
-    "ILUMINACAO_OK": "Iluminação",
-    "PARABRISA_OK": "Para-brisa",
-    "FALHAS_PAINEL_OK": "Presença de falhas no painel",
-    "TACOGRAFO_OK": "Funcionamento tacógrafo",
-    "CÂMERA_COLUNALD": "Câmera Coluna Lado Direito",
-    "CÂMERA_COLUNALE": "Câmera Coluna Lado Esquerdo",
-    "CÂMERA_DEFLETORLD": "Câmera Defletor Lado Direito",
-    "CÂMERA_DEFLETORLE": "Câmera Defletor Lado Esquerdo",
-    "CÂMERA_PARABRISA": "Câmera do para-brisa",
-    "PORTAL_OK": "Portal de câmeras",
-    "FUNCIONAMENTO_TK_OK": "Funcionamento TK"
-}
+        "ARREFECIMENTO_OK": "Nível do líquido de arrefecimento",
+        "OLEO_MOTOR_OK": "Nível de óleo de motor",
+        "VAZAMENTO_OLEO_MOTOR": "Vazamento de óleo motor",
+        "VAZAMENTO_AGUA_MOTOR": "Vazamento de água motor",
+        "OLEO_CAMBIO_OK": "Vazamento de óleo câmbio",
+        "OLEO_DIFERENCIAL_OK": "Vazamento de óleo diferencial",
+        "OLEO_CUBOS_OK": "Vazamento de óleo cubos",
+        "DIESEL_OK": "Vazamento de diesel",
+        "GNV_OK": "Vazamento de GNV",
+        "VAZAMENTO_AR_OK": "Vazamento de ar",
+        "PNEUS_OK": "Pneus avariados",
+        "FAIXAS_REFLETIVAS_OK": "Faixas refletivas",
+        "FUNILARIA_OK": "Itens avariados para funilaria",
+        "ILUMINACAO_OK": "Iluminação",
+        "PARABRISA_OK": "Para-brisa",
+        "FALHAS_PAINEL_OK": "Presença de falhas no painel",
+        "TACOGRAFO_OK": "Funcionamento tacógrafo",
+        "CÂMERA_PARABRISA": "Câmera do para-brisa",
+        "CÂMERA_COLUNALD": "Câmera Coluna Lado Direito",
+        "CÂMERA_COLUNALE": "Câmera Coluna Lado Esquerdo",
+        "CÂMERA_DEFLETORLD": "Câmera Defletor Lado Direito",
+        "CÂMERA_DEFLETORLE": "Câmera Defletor Lado Esquerdo",
+        "PORTAL_OK": "Imagem Digital",
+        "FUNCIONAMENTO_TK_OK": "Funcionamento TK"
+    }
 
+    for chave, descricao in checklist_itens.items():
+        opcao = st.radio(
+            descricao,
+            options=["OK", "NÃO OK"],
+            index=0,
+            key=f"radio_{chave}",
+            horizontal=True
+        )
+        st.session_state.dados[chave] = opcao
+        if opcao == "NÃO OK":
+            foto = st.file_uploader(f"Foto de {descricao}", type=['jpg', 'jpeg', 'png'], key=f"foto_{chave}")
+            if foto:
+                st.session_state.fotos_nao_ok[chave] = foto
 
-    for chave, label in checklist_itens.items():
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            toggle_val = st.toggle(f"{label} (Ativar se NÃO OK)", key=chave)
-        with col2:
-            foto = None
-            if toggle_val:
-                foto = st.file_uploader("", type=['jpg', 'jpeg', 'png'], key=f"foto_{chave}", label_visibility="collapsed")
-        status = "NÃO OK" if toggle_val else "OK"
-        st.session_state.dados[chave] = status
-        st.session_state.fotos_nao_ok[chave] = foto
+    # Garantir inicialização de finalizando
+    if "finalizando" not in st.session_state:
+        st.session_state.finalizando = False
 
-    observacao = st.text_area("Observações")
-    st.session_state.dados['OBSERVACOES'] = observacao
+    # Botão para finalizar checklist
+    if st.button("✅ Finalizar Checklist", disabled=st.session_state.finalizando):
+        st.session_state.finalizando = True
+        with st.spinner("Finalizando checklist..."):
+            try:
+                # Gerar Word
+                doc = Document("Checklist_Preenchivel.docx")
+                for p in doc.paragraphs:
+                    for k, v in st.session_state.dados.items():
+                        if f"{{{{{k}}}}}" in p.text:
+                            p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for p in cell.paragraphs:
+                                for k, v in st.session_state.dados.items():
+                                    if f"{{{{{k}}}}}" in p.text:
+                                        p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
+                buffer_word = BytesIO()
+                doc.save(buffer_word)
+                buffer_word.seek(0)
 
-    if st.button("✅ Finalizar Checklist"):
-        # Gerar Word
-        doc = Document("Checklist_Preenchivel.docx")
-        for p in doc.paragraphs:
-            for k, v in st.session_state.dados.items():
-                if f"{{{{{k}}}}}" in p.text:
-                    p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for p in cell.paragraphs:
-                        for k, v in st.session_state.dados.items():
-                            if f"{{{{{k}}}}}" in p.text:
-                                p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
-        buffer_word = BytesIO()
-        doc.save(buffer_word)
-        buffer_word.seek(0)
+                # Gerar PDF
+                buffer_pdf = BytesIO()
+                c = canvas.Canvas(buffer_pdf, pagesize=A4)  
+                text = c.beginText(40, 800)
+                text.setFont("Helvetica", 12)
+                for chave, valor in st.session_state.dados.items():
+                    text.textLine(f"{chave}: {valor}")
+                c.drawText(text)
+                c.showPage()
+                c.save()
+                buffer_pdf.seek(0)
 
-        # Gerar PDF
-        buffer_pdf = BytesIO()
-        c = canvas.Canvas(buffer_pdf, pagesize=A4)
-        text = c.beginText(40, 800)
-        text.setFont("Helvetica", 12)
-        for chave, valor in st.session_state.dados.items():
-            text.textLine(f"{chave}: {valor}")
-        c.drawText(text)
-        c.showPage()
-        c.save()
-        buffer_pdf.seek(0)
+                # Enviar e-mail
+                if enviar_email(buffer_word, buffer_pdf, st.session_state.fotos_nao_ok):
+                    st.success("Checklist concluído com Sucesso! Reiniciando...")
+                    time.sleep(1.5)  # pequena pausa para exibir mensagem
+                    st.session_state.clear()
+                    st.session_state.etapa = 1
+                    st.rerun()
+                else:
+                    st.session_state.finalizando = False
+                    st.error("O checklist foi gerado, mas o envio do e-mail falhou.")
+                    st.stop()
 
-        # Enviar e-mail
-        if enviar_email(buffer_word, buffer_pdf, st.session_state.fotos_nao_ok):
-            st.success("Checklist enviado por e-mail com sucesso!")
-
-        # Downloads
-        st.download_button("📄 Baixar Word", buffer_word, file_name="Checklist_Preenchido.docx")
-        st.download_button("📄 Baixar PDF", buffer_pdf, file_name="Checklist_Final.pdf")
+            except Exception as e:
+                st.session_state.finalizando = False
+                st.error(f"Erro ao finalizar checklist: {e}")
