@@ -16,7 +16,7 @@ load_dotenv()
 
 # Configuração da página
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
-st.title("🚚 CheckList Manutenção")
+st.title("📝 CheckList Manutenção")
 
 
 # Estados
