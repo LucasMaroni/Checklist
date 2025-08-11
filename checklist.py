@@ -9,15 +9,14 @@ import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
 import getpass
+import zipfile
 
 # Carregar variáveis de ambiente
 load_dotenv()
 
-
 # Configuração da página
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
 st.title("📝 CheckList Manutenção")
-
 
 # Estados
 if "etapa" not in st.session_state:
@@ -30,7 +29,7 @@ if "fotos_nao_ok" not in st.session_state:
     st.session_state.fotos_nao_ok = {}
 
 # Função envio de e-mail
-def enviar_email(arquivo_word, arquivo_pdf, fotos_extra):
+def enviar_email(arquivo_word, arquivo_pdf, fotos_extra, fotos_etapa2):
     try:
         msg = EmailMessage()
         msg["Subject"] = f"Checklist - {st.session_state.dados['PLACA_CAMINHAO']}"
@@ -38,18 +37,23 @@ def enviar_email(arquivo_word, arquivo_pdf, fotos_extra):
         msg["To"] = os.getenv("EMAIL_DESTINO")
         msg.set_content("Segue em anexo o checklist finalizado e imagens.")
 
+        # Anexar Word
         msg.add_attachment(
             arquivo_word.getvalue(),
             maintype="application",
             subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename="Checklist_Preenchido.docx"
         )
+
+        # Anexar PDF
         msg.add_attachment(
             arquivo_pdf.getvalue(),
             maintype="application",
             subtype="pdf",
             filename="Checklist_Final.pdf"
         )
+
+        # Anexar fotos NÃO OK da etapa 3
         for nome_item, arquivo in fotos_extra.items():
             if arquivo:
                 msg.add_attachment(
@@ -59,6 +63,22 @@ def enviar_email(arquivo_word, arquivo_pdf, fotos_extra):
                     filename=f"foto_{nome_item}.jpg"
                 )
 
+        # Criar ZIP com as fotos da etapa 2
+        if fotos_etapa2:
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for idx, foto in enumerate(fotos_etapa2, start=1):
+                    zipf.writestr(f"foto_etapa2_{idx}.jpg", foto.getvalue())
+            zip_buffer.seek(0)
+
+            msg.add_attachment(
+                zip_buffer.getvalue(),
+                maintype="application",
+                subtype="zip",
+                filename="Fotos_Etapa2.zip"
+            )
+
+        # Enviar e-mail
         with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
             smtp.starttls()
             smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
@@ -84,7 +104,7 @@ if st.session_state.etapa == 1:
         windll.secur32.GetUserNameExW(3, buffer, (n := len(buffer)))
         nome_completo = buffer.value
     except:
-        nome_completo = getpass.getuser()
+        nome_completo = getpass.getuser()   
     st.session_state.dados['VISTORIADOR'] = nome_completo
 
     tipo_veiculo = st.radio("Tipo de veículo", ["CAVALO", "RÍGIDO"])
@@ -158,12 +178,10 @@ elif st.session_state.etapa == 2:
         st.warning("Envie no mínimo 4 imagens.")
 
 # -----------------
-# -----------------
-# -----------------
-# -----------------
+# ETAPA 3
 # -----------------
 elif st.session_state.etapa == 3:
-    import time  # usado apenas para breve atraso visual antes do rerun
+    import time  
 
     st.subheader("Etapa 3: Checklist")
     checklist_itens = {
@@ -207,11 +225,9 @@ elif st.session_state.etapa == 3:
             if foto:
                 st.session_state.fotos_nao_ok[chave] = foto
 
-    # Garantir inicialização de finalizando
     if "finalizando" not in st.session_state:
         st.session_state.finalizando = False
 
-    # Botão para finalizar checklist
     if st.button("✅ Finalizar Checklist", disabled=st.session_state.finalizando):
         st.session_state.finalizando = True
         with st.spinner("Finalizando checklist..."):
@@ -246,9 +262,9 @@ elif st.session_state.etapa == 3:
                 buffer_pdf.seek(0)
 
                 # Enviar e-mail
-                if enviar_email(buffer_word, buffer_pdf, st.session_state.fotos_nao_ok):
+                if enviar_email(buffer_word, buffer_pdf, st.session_state.fotos_nao_ok, st.session_state.imagens):
                     st.success("Checklist concluído com Sucesso! Reiniciando...")
-                    time.sleep(1.5)  # pequena pausa para exibir mensagem
+                    time.sleep(1.5)
                     st.session_state.clear()
                     st.session_state.etapa = 1
                     st.rerun()
