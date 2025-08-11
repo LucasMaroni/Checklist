@@ -10,44 +10,52 @@ from email.message import EmailMessage
 from dotenv import load_dotenv
 import getpass
 
-# Carregar variáveis do .env
+# Carregar variáveis de ambiente
 load_dotenv()
 
-# Configuração de página
+# Configuração da página
 st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
-st.title("🚚 Checklist de Caminhão")
+st.title("🚚 CheckList Manutenção")
 
-# Estados da aplicação
+# Estados
 if "etapa" not in st.session_state:
     st.session_state.etapa = 1
 if "dados" not in st.session_state:
     st.session_state.dados = {}
 if "imagens" not in st.session_state:
     st.session_state.imagens = []
+if "fotos_nao_ok" not in st.session_state:
+    st.session_state.fotos_nao_ok = {}
 
-# Função para enviar e-mail com anexos
-def enviar_email(arquivo_word, arquivo_pdf):
+# Função envio de e-mail
+def enviar_email(arquivo_word, arquivo_pdf, fotos_extra):
     try:
         msg = EmailMessage()
         msg["Subject"] = f"Checklist - {st.session_state.dados['PLACA_CAMINHAO']}"
         msg["From"] = os.getenv("EMAIL_USER")
         msg["To"] = os.getenv("EMAIL_DESTINO")
-        msg.set_content("Segue em anexo o checklist finalizado.")
+        msg.set_content("Segue em anexo o checklist finalizado e imagens.")
 
-        # Anexa Word
         msg.add_attachment(
             arquivo_word.getvalue(),
             maintype="application",
             subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename="Checklist_Preenchido.docx"
         )
-        # Anexa PDF
         msg.add_attachment(
             arquivo_pdf.getvalue(),
             maintype="application",
             subtype="pdf",
             filename="Checklist_Final.pdf"
         )
+        for nome_item, arquivo in fotos_extra.items():
+            if arquivo:
+                msg.add_attachment(
+                    arquivo.getvalue(),
+                    maintype="image",
+                    subtype="jpeg",
+                    filename=f"foto_{nome_item}.jpg"
+                )
 
         with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
             smtp.starttls()
@@ -59,14 +67,14 @@ def enviar_email(arquivo_word, arquivo_pdf):
         st.error(f"Erro ao enviar e-mail: {e}")
         return False
 
-# Etapa 1
+# -----------------
+# ETAPA 1
+# -----------------
 if st.session_state.etapa == 1:
     st.subheader("Etapa 1: Dados Básicos")
-    st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8, placeholder="ABC1234")
-    st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual", placeholder="Ex: 120000")
-    st.session_state.dados['MOTORISTA'] = st.text_input("Motorista", placeholder="Nome completo")
-    st.session_state.dados['PLACA_CARRETA1'] = st.text_input("Placa Carreta 1", max_chars=8)
-    st.session_state.dados['PLACA_CARRETA2'] = st.text_input("Placa Carreta 2", max_chars=8)
+    st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8)
+    st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual")
+    st.session_state.dados['MOTORISTA'] = st.text_input("Motorista")
 
     try:
         from ctypes import windll, create_unicode_buffer
@@ -78,6 +86,8 @@ if st.session_state.etapa == 1:
     st.session_state.dados['VISTORIADOR'] = nome_completo
 
     tipo_veiculo = st.radio("Tipo de veículo", ["CAVALO", "RÍGIDO"])
+    st.session_state.dados['TIPO_VEICULO'] = tipo_veiculo
+
     if tipo_veiculo == "CAVALO":
         subtipo = st.radio("Configuração do Cavalo", ["TOCO 4X2", "TRUCADO 6X2", "TRAÇADO 6X4"])
         st.session_state.dados.update({
@@ -88,6 +98,20 @@ if st.session_state.etapa == 1:
             "RIGIDO_TRUCADO": "",
             "RIGIDO_TRACADO": "",
         })
+
+        bitrem = st.toggle("Veículo é BITREM?")
+        st.session_state.dados['BITREM'] = "SIM" if bitrem else "NÃO"
+        st.session_state.dados['PLACA_CARRETA1'] = st.text_input("Placa Carreta 1", max_chars=8)
+
+        if bitrem:
+            st.session_state.dados['PLACA_CARRETA2'] = st.text_input("Placa Carreta 2", max_chars=8)
+        else:
+            st.session_state.dados['PLACA_CARRETA2'] = ""
+
+        tipo_carreta = st.radio("Tipo de Carreta", ["2 EIXOS", "3 EIXOS"])
+        st.session_state.dados["CARRETA_2"] = "X" if tipo_carreta == "2 EIXOS" else ""
+        st.session_state.dados["CARRETA_3"] = "X" if tipo_carreta == "3 EIXOS" else ""
+
     else:
         subtipo = st.radio("Configuração do Rígido", ["TOCO 4X2", "TRUCADO 6X2", "TRAÇADO 6X4"])
         st.session_state.dados.update({
@@ -98,18 +122,17 @@ if st.session_state.etapa == 1:
             "CAVALO_TRUCADO": "",
             "CAVALO_TRACADO": "",
         })
-
-    tipo_carreta = st.radio("Carreta", ["2 EIXOS", "3 EIXOS"])
-    st.session_state.dados["CARRETA_2"] = "X" if tipo_carreta == "2 EIXOS" else ""
-    st.session_state.dados["CARRETA_3"] = "X" if tipo_carreta == "3 EIXOS" else ""
+        st.session_state.dados['PLACA_CARRETA1'] = ""
+        st.session_state.dados['PLACA_CARRETA2'] = ""
+        st.session_state.dados['BITREM'] = "NÃO"
+        st.session_state.dados["CARRETA_2"] = ""
+        st.session_state.dados["CARRETA_3"] = ""
 
     if st.button("Avançar ➡️"):
         if all([
             st.session_state.dados['PLACA_CAMINHAO'],
             st.session_state.dados['KM_ATUAL'],
-            st.session_state.dados['MOTORISTA'],
-            st.session_state.dados['PLACA_CARRETA1'],
-            st.session_state.dados['PLACA_CARRETA2']
+            st.session_state.dados['MOTORISTA']
         ]):
             st.session_state.dados["DATA"] = datetime.now().strftime("%d/%m/%Y")
             st.session_state.dados["HORA"] = datetime.now().strftime("%H:%M")
@@ -117,9 +140,13 @@ if st.session_state.etapa == 1:
         else:
             st.warning("Preencha todos os campos obrigatórios.")
 
-# Etapa 2
+# -----------------
+# ETAPA 2
+# -----------------
 elif st.session_state.etapa == 2:
     st.subheader("Etapa 2: Inserção de Fotos")
+    st.image("Checklist.png", caption="Exemplo dos ângulos corretos para as fotos", use_container_width=True)   
+    
     imagens = st.file_uploader("Envie ao menos 4 fotos", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
     if imagens and len(imagens) >= 4:
         st.session_state.imagens = imagens
@@ -128,34 +155,57 @@ elif st.session_state.etapa == 2:
     else:
         st.warning("Envie no mínimo 4 imagens.")
 
-# Etapa 3
+# -----------------
+# ETAPA 3
+# -----------------
 elif st.session_state.etapa == 3:
     st.subheader("Etapa 3: Checklist Técnico")
+
     checklist_itens = {
-        "VAZAMENTO_OLEO_MOTOR": st.checkbox("Vazamento de óleo motor"),
-        "VAZAMENTO_AGUA_MOTOR": st.checkbox("Vazamento de água motor"),
-        "OLEO_MOTOR_OK": st.checkbox("Nível de óleo de motor"),
-        "ARREFECIMENTO_OK": st.checkbox("Nível do líquido de arrefecimento"),
-        "OLEO_CAMBIO_OK": st.checkbox("Vazamento de óleo câmbio"),
-        "OLEO_DIFERENCIAL_OK": st.checkbox("Vazamento de óleo diferencial"),
-        "OLEO_CUBOS_OK": st.checkbox("Vazamento de óleo cubos"),
-        "VAZAMENTO_AR_OK": st.checkbox("Vazamento de ar"),
-        "PNEUS_OK": st.checkbox("Pneus avariados"),
-        "PARABRISA_OK": st.checkbox("Para-brisa"),
-        "ILUMINACAO_OK": st.checkbox("Iluminação"),
-        "FAIXAS_REFLETIVAS_OK": st.checkbox("Faixas refletivas"),
-        "FALHAS_PAINEL_OK": st.checkbox("Falhas no painel"),
-        "FUNCIONAMENTO_TK_OK": st.checkbox("Funcionamento TK"),
-        "TACOGRAFO_OK": st.checkbox("Funcionamento tacógrafo"),
-        "FUNILARIA_OK": st.checkbox("Itens para funilaria"),
-    }
+    "ARREFECIMENTO_OK": "Nível do líquido de arrefecimento",
+    "OLEO_MOTOR_OK": "Nível de óleo de motor",
+    "VAZAMENTO_OLEO_MOTOR": "Vazamento de óleo motor",
+    "VAZAMENTO_AGUA_MOTOR": "Vazamento de água motor",
+    "OLEO_CAMBIO_OK": "Vazamento de óleo câmbio",
+    "OLEO_DIFERENCIAL_OK": "Vazamento de óleo diferencial",
+    "OLEO_CUBOS_OK": "Vazamento de óleo cubos",
+    "DIESEL_OK": "Vazamento de diesel",
+    "GNV_OK": "Vazamento de GNV",
+    "VAZAMENTO_AR_OK": "Vazamento de ar",
+    "PNEUS_OK": "Pneus avariados",
+    "FAIXAS_REFLETIVAS_OK": "Faixas refletivas",
+    "FUNILARIA_OK": "Itens avariados para funilaria",
+    "ILUMINACAO_OK": "Iluminação",
+    "PARABRISA_OK": "Para-brisa",
+    "FALHAS_PAINEL_OK": "Presença de falhas no painel",
+    "TACOGRAFO_OK": "Funcionamento tacógrafo",
+    "CÂMERA_COLUNALD": "Câmera Coluna Lado Direito",
+    "CÂMERA_COLUNALE": "Câmera Coluna Lado Esquerdo",
+    "CÂMERA_DEFLETORLD": "Câmera Defletor Lado Direito",
+    "CÂMERA_DEFLETORLE": "Câmera Defletor Lado Esquerdo",
+    "CÂMERA_PARABRISA": "Câmera do para-brisa",
+    "PORTAL_OK": "Portal de câmeras",
+    "FUNCIONAMENTO_TK_OK": "Funcionamento TK"
+}
+
+
+    for chave, label in checklist_itens.items():
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            toggle_val = st.toggle(f"{label} (Ativar se NÃO OK)", key=chave)
+        with col2:
+            foto = None
+            if toggle_val:
+                foto = st.file_uploader("", type=['jpg', 'jpeg', 'png'], key=f"foto_{chave}", label_visibility="collapsed")
+        status = "NÃO OK" if toggle_val else "OK"
+        st.session_state.dados[chave] = status
+        st.session_state.fotos_nao_ok[chave] = foto
+
     observacao = st.text_area("Observações")
+    st.session_state.dados['OBSERVACOES'] = observacao
 
     if st.button("✅ Finalizar Checklist"):
-        st.session_state.dados.update({k: "OK" if v else "NÃO OK" for k, v in checklist_itens.items()})
-        st.session_state.dados['OBSERVACOES'] = observacao
-
-        # Gerar Word em memória
+        # Gerar Word
         doc = Document("Checklist_Preenchivel.docx")
         for p in doc.paragraphs:
             for k, v in st.session_state.dados.items():
@@ -172,7 +222,7 @@ elif st.session_state.etapa == 3:
         doc.save(buffer_word)
         buffer_word.seek(0)
 
-        # Gerar PDF em memória
+        # Gerar PDF
         buffer_pdf = BytesIO()
         c = canvas.Canvas(buffer_pdf, pagesize=A4)
         text = c.beginText(40, 800)
@@ -184,10 +234,10 @@ elif st.session_state.etapa == 3:
         c.save()
         buffer_pdf.seek(0)
 
-        # Enviar por e-mail
-        if enviar_email(buffer_word, buffer_pdf):
+        # Enviar e-mail
+        if enviar_email(buffer_word, buffer_pdf, st.session_state.fotos_nao_ok):
             st.success("Checklist enviado por e-mail com sucesso!")
 
-        # Disponibilizar para download
+        # Downloads
         st.download_button("📄 Baixar Word", buffer_word, file_name="Checklist_Preenchido.docx")
         st.download_button("📄 Baixar PDF", buffer_pdf, file_name="Checklist_Final.pdf")
