@@ -10,6 +10,7 @@ from email.message import EmailMessage
 from dotenv import load_dotenv
 import getpass
 import zipfile
+import time
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -28,70 +29,123 @@ if "imagens" not in st.session_state:
 if "fotos_nao_ok" not in st.session_state:
     st.session_state.fotos_nao_ok = {}
 
-# Função envio de e-mail
-def enviar_email(arquivo_word, arquivo_pdf, fotos_extra, fotos_etapa2):
-    try:
-        msg = EmailMessage()
-        msg["Subject"] = f"Checklist - {st.session_state.dados['PLACA_CAMINHAO']}"
-        msg["From"] = os.getenv("EMAIL_USER")
-        msg["To"] = os.getenv("EMAIL_DESTINO")
-        msg.set_content("Segue em anexo o checklist finalizado e imagens.")
+# -------------------
+# RESPONSÁVEIS POR ITEM (grupos)
+# -------------------
+RESPONSAVEIS = {
+    (
+        "ruberval.silva@transmaroni.com.br",
+        "alex.franca@transmaroni.com.br",
+        "jose.oliveira@transmaroni.com.br",
+        "sarah.ferreira@transmaroni.com.br",
+        "enielle.argolo@transmaroni.com.br",
+        "michele.silva@transmaroni.com.br",
+        "sabrina.silva@transmaroni.com.br"
+    ): [
+        "VAZAMENTO_OLEO_MOTOR", "VAZAMENTO_AGUA_MOTOR", "OLEO_MOTOR_OK", "ARREFECIMENTO_OK",
+        "OLEO_CAMBIO_OK", "OLEO_DIFERENCIAL_OK", "DIESEL_OK", "GNV_OK", "OLEO_CUBOS_OK",
+        "VAZAMENTO_AR_OK", "PNEUS_OK", "PARABRISA_OK", "ILUMINACAO_OK", "FAIXAS_REFLETIVAS_OK",
+        "FALHAS_PAINEL_OK"
+    ],
+    ("lucas.alves@transmaroni.com.br",): [
+        "FUNCIONAMENTO_TK_OK"
+    ],
+    ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br"): [
+        "TACOGRAFO_OK"
+    ],
+    ("wesley.assumpcao@transmaroni.com.br", "bruna.silva@transmaroni.com.br", "alex.franca@transmaroni.com.br"): [
+        "FUNILARIA_OK"
+    ],
+    # Grupo de câmeras e imagem digital
+    ("mirella.trindade@transmaroni.com.br",): [
+        "CÂMERA_COLUNALD", "CÂMERA_COLUNALE", "CÂMERA_DEFLETORLD", "CÂMERA_DEFLETORLE",
+        "CÂMERA_PARABRISA",
+        # Itens IMAGEM DIGITAL solicitados (devem existir no DOCX como {{...}})
+        "CÂMERACOLUNA_LD", "CÂMERACOLUNA_LE", "CÂMERADEFLETOR_LD", "CÂMERADEFLETOR_LE"
+    ],
+}
 
-        # Anexar Word
+# -------------------
+# FUNÇÕES AUXILIARES
+# -------------------
+def gerar_zip_imagens(imagens):
+    """Cria um ZIP com as imagens da etapa 2"""
+    buffer_zip = BytesIO()
+    with zipfile.ZipFile(buffer_zip, "w") as zf:
+        for idx, img in enumerate(imagens, start=1):
+            zf.writestr(f"foto_{idx}.jpg", img.getvalue())
+    buffer_zip.seek(0)
+    return buffer_zip
+
+def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, buffer_word, buffer_zip):
+    """Envia os e-mails para os responsáveis de cada item com Word, ZIP e fotos dos itens"""
+    hora_atual = datetime.now().hour
+    saudacao = "Bom dia" if hora_atual < 12 else "Boa tarde"
+
+    for destinatarios, itens_responsaveis in RESPONSAVEIS.items():
+        itens_do_grupo = [i for i in itens_nao_ok if i in itens_responsaveis]
+        if not itens_do_grupo:
+            continue
+
+        msg = EmailMessage()
+        msg["Subject"] = f"[Checklist] Itens a verificar - {st.session_state.dados.get('PLACA_CAMINHAO','')}"
+        msg["From"] = os.getenv("EMAIL_USER")
+        msg["To"] = ", ".join(destinatarios)
+
+        itens_texto = "\n".join([f"- {checklist_itens[i]}" for i in itens_do_grupo])
+        msg.set_content(
+            f"{saudacao},\n\n"
+            f"Motorista: {st.session_state.dados.get('MOTORISTA','')}\n"
+            f"Vistoriador: {st.session_state.dados.get('VISTORIADOR','')}\n"
+            f"Data: {st.session_state.dados.get('DATA','')} {st.session_state.dados.get('HORA','')}\n\n"
+            f"O veículo {st.session_state.dados.get('PLACA_CAMINHAO','')} foi verificado em seu CHECKLIST.\n"
+            f"Os seguintes itens foram vistoriados e precisam ser encaminhados para manutenção:\n\n"
+            f"{itens_texto}\n\n"
+            "Segue a ficha técnica em anexo, as fotos da etapa 2 em pasta compactada e as fotos dos itens NÃO OK.\n\n"
+            "Atenciosamente,\nSistema de Checklist"
+        )
+
+        # Anexar Ficha Técnica (Word)
         msg.add_attachment(
-            arquivo_word.getvalue(),
+            buffer_word.getvalue(),
             maintype="application",
             subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename="Checklist_Preenchido.docx"
+            filename="Ficha_Tecnica.docx"
         )
 
-        # Anexar PDF
+        # Anexar ZIP das fotos da etapa 2
         msg.add_attachment(
-            arquivo_pdf.getvalue(),
+            buffer_zip.getvalue(),
             maintype="application",
-            subtype="pdf",
-            filename="Checklist_Final.pdf"
+            subtype="zip",
+            filename="Fotos_Checklist.zip"
         )
 
-        # Anexar fotos NÃO OK da etapa 3
-        for nome_item, arquivo in fotos_extra.items():
-            if arquivo:
-                msg.add_attachment(
-                    arquivo.getvalue(),
-                    maintype="image",
-                    subtype="jpeg",
-                    filename=f"foto_{nome_item}.jpg"
-                )
+        # Anexar fotos dos itens NÃO OK (somente os do grupo)
+        for item in itens_do_grupo:
+            if item in fotos_nao_ok:
+                arquivos = fotos_nao_ok[item]
+                if not isinstance(arquivos, list):
+                    arquivos = [arquivos]
+                for idx, foto in enumerate(arquivos, start=1):
+                    msg.add_attachment(
+                        foto.getvalue(),
+                        maintype="image",
+                        subtype="jpeg",
+                        filename=f"{item}_{idx}.jpg"
+                    )
 
-        # Criar ZIP com as fotos da etapa 2
-        if fotos_etapa2:
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-                for idx, foto in enumerate(fotos_etapa2, start=1):
-                    zipf.writestr(f"foto_etapa2_{idx}.jpg", foto.getvalue())
-            zip_buffer.seek(0)
+        try:
+            with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
+                smtp.starttls()
+                smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
+                smtp.send_message(msg)
+        except Exception as e:
+            st.error(f"Erro ao enviar e-mail para {destinatarios}: {e}")
 
-            msg.add_attachment(
-                zip_buffer.getvalue(),
-                maintype="application",
-                subtype="zip",
-                filename="Fotos_Etapa2.zip"
-            )
-
-        # Enviar e-mail
-        with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
-            smtp.starttls()
-            smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
-            smtp.send_message(msg)
-
-        return True
-    except Exception as e:
-        st.error(f"Erro ao enviar e-mail: {e}")
-        return False
-
-# -----------------
+# -------------------
 # ETAPA 1
-# -----------------
+# -------------------
 if st.session_state.etapa == 1:
     st.subheader("Dados do Veículo e Condutor")
     st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8)
@@ -162,27 +216,35 @@ if st.session_state.etapa == 1:
         else:
             st.warning("Preencha todos os campos obrigatórios.")
 
-# -----------------
+# -------------------
 # ETAPA 2
-# -----------------
+# -------------------
 elif st.session_state.etapa == 2:
-    st.subheader("Inserção das Imagens.")
-    st.image("Checklist.png", caption="Exemplo dos ângulos corretos para as fotos", use_container_width=True)   
-    
-    imagens = st.file_uploader("Envie ao menos 4 fotos", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+    st.subheader("Inserção das Imagens")
+    st.image("Checklist.png", caption="Exemplo dos ângulos corretos", use_container_width=True)
+
+    imagens = st.file_uploader(
+        "Envie ao menos 4 fotos",
+        type=['jpg', 'jpeg', 'png'],
+        accept_multiple_files=True
+    )
     if imagens and len(imagens) >= 4:
         st.session_state.imagens = imagens
-        if st.button("Avançar ➡️"):
+
+    col1, col2 = st.columns(2)
+    if col1.button("⬅️ Voltar"):
+        st.session_state.etapa = 1
+        st.rerun()
+    if col2.button("Avançar ➡️"):
+        if st.session_state.imagens and len(st.session_state.imagens) >= 4:
             st.session_state.etapa = 3
-    else:
-        st.warning("Envie no mínimo 4 imagens.")
+        else:
+            st.warning("Envie no mínimo 4 imagens.")
 
-# -----------------
+# -------------------
 # ETAPA 3
-# -----------------
+# -------------------
 elif st.session_state.etapa == 3:
-    import time  
-
     st.subheader("Etapa 3: Checklist")
     checklist_itens = {
         "ARREFECIMENTO_OK": "Nível do líquido de arrefecimento",
@@ -207,51 +269,74 @@ elif st.session_state.etapa == 3:
         "CÂMERA_COLUNALE": "Câmera Coluna Lado Esquerdo",
         "CÂMERA_DEFLETORLD": "Câmera Defletor Lado Direito",
         "CÂMERA_DEFLETORLE": "Câmera Defletor Lado Esquerdo",
-        "PORTAL_OK": "Imagem Digital",
-        "FUNCIONAMENTO_TK_OK": "Funcionamento TK"
+        "FUNCIONAMENTO_TK_OK": "Funcionamento TK",
+
+        # ===== Itens IMAGEM DIGITAL solicitados (chaves EXATAS do DOCX) =====
+        "CÂMERACOLUNA_LD": "Imagem digital câmera coluna LD",
+        "CÂMERACOLUNA_LE": "Imagem digital câmera coluna LE",
+        "CÂMERADEFLETOR_LD": "Imagem digital câmera defletor LD",
+        "CÂMERADEFLETOR_LE": "Imagem digital câmera defletor LE",
     }
 
     for chave, descricao in checklist_itens.items():
         opcao = st.radio(
             descricao,
-            options=["OK", "NÃO OK"],
+            ["OK", "NÃO OK"],
             index=0,
             key=f"radio_{chave}",
             horizontal=True
         )
         st.session_state.dados[chave] = opcao
         if opcao == "NÃO OK":
-            foto = st.file_uploader(f"Foto de {descricao}", type=['jpg', 'jpeg', 'png'], key=f"foto_{chave}")
-            if foto:
-                st.session_state.fotos_nao_ok[chave] = foto
+            fotos = st.file_uploader(
+                f"Fotos de {descricao}",
+                type=['jpg', 'jpeg', 'png'],
+                key=f"foto_{chave}",
+                accept_multiple_files=True
+            )
+            if fotos:
+                st.session_state.fotos_nao_ok[chave] = fotos
+
+    # Campo OBSERVAÇÕES solicitado
+    st.session_state.dados["OBSERVACOES"] = st.text_area("Observações", placeholder="Digite informações adicionais, se necessário.")
 
     if "finalizando" not in st.session_state:
         st.session_state.finalizando = False
 
-    if st.button("✅ Finalizar Checklist", disabled=st.session_state.finalizando):
+    col1, col2 = st.columns(2)
+    if col1.button("⬅️ Voltar"):
+        st.session_state.etapa = 2
+        st.rerun()
+
+    if col2.button("✅ Finalizar Checklist", disabled=st.session_state.finalizando):
         st.session_state.finalizando = True
         with st.spinner("Finalizando checklist..."):
             try:
-                # Gerar Word
-                doc = Document("Checklist_Preenchivel.docx")
+                # ===== Gera Word a partir do template =====
+                # Certifique-se que o arquivo do template corresponde ao seu DOCX:
+                # Ex.: "Ficha Técnica.docx" e contém os placeholders {{CHAVE}}
+                doc = Document("Ficha Técnica.docx")
                 for p in doc.paragraphs:
                     for k, v in st.session_state.dados.items():
-                        if f"{{{{{k}}}}}" in p.text:
-                            p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
+                        token = f"{{{{{k}}}}}"
+                        if token in p.text:
+                            p.text = p.text.replace(token, str(v))
                 for table in doc.tables:
                     for row in table.rows:
                         for cell in row.cells:
                             for p in cell.paragraphs:
                                 for k, v in st.session_state.dados.items():
-                                    if f"{{{{{k}}}}}" in p.text:
-                                        p.text = p.text.replace(f"{{{{{k}}}}}", str(v))
+                                    token = f"{{{{{k}}}}}"
+                                    if token in p.text:
+                                        p.text = p.text.replace(token, str(v))
+
                 buffer_word = BytesIO()
                 doc.save(buffer_word)
                 buffer_word.seek(0)
 
-                # Gerar PDF
+                # (Mantido) Gera PDF simples com os dados - opcional
                 buffer_pdf = BytesIO()
-                c = canvas.Canvas(buffer_pdf, pagesize=A4)  
+                c = canvas.Canvas(buffer_pdf, pagesize=A4)
                 text = c.beginText(40, 800)
                 text.setFont("Helvetica", 12)
                 for chave, valor in st.session_state.dados.items():
@@ -261,17 +346,26 @@ elif st.session_state.etapa == 3:
                 c.save()
                 buffer_pdf.seek(0)
 
-                # Enviar e-mail
-                if enviar_email(buffer_word, buffer_pdf, st.session_state.fotos_nao_ok, st.session_state.imagens):
-                    st.success("Checklist concluído com Sucesso! Reiniciando...")
-                    time.sleep(1.5)
-                    st.session_state.clear()
-                    st.session_state.etapa = 1
-                    st.rerun()
-                else:
-                    st.session_state.finalizando = False
-                    st.error("O checklist foi gerado, mas o envio do e-mail falhou.")
-                    st.stop()
+                # ZIP das fotos etapa 2
+                buffer_zip = gerar_zip_imagens(st.session_state.imagens)
+
+                # Itens NÃO OK (para e-mails)
+                itens_nao_ok = [k for k, v in st.session_state.dados.items() if v == "NÃO OK"]
+
+                # Envia e-mails com Word, ZIP e fotos dos itens
+                enviar_emails_personalizados(
+                    itens_nao_ok,
+                    st.session_state.fotos_nao_ok,
+                    checklist_itens,
+                    buffer_word,
+                    buffer_zip
+                )
+
+                st.success("Checklist concluído e e-mails enviados! Reiniciando...")
+                time.sleep(2)
+                st.session_state.clear()
+                st.session_state.etapa = 1
+                st.rerun()
 
             except Exception as e:
                 st.session_state.finalizando = False
