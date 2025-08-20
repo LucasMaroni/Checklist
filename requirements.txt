@@ -3,3 +3,6 @@ python-docx
 PyPDF2
 reportlab
 python-dotenv
+pandas
+numpy
+office365-rest-python-client
