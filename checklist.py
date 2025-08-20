@@ -47,7 +47,7 @@ RESPONSAVEIS = {
         "VAZAMENTO_AR_OK", "PNEUS_OK", "PARABRISA_OK", "ILUMINACAO_OK", "FAIXAS_REFLETIVAS_OK",
         "FALHAS_PAINEL_OK"
     ],
-    ("lucas.alves@transmaroni.com.br", "tiago.ribeiro@transmaroni.com.br"): [
+    ("lucas.alves@transmaroni.com.br",): [
         "FUNCIONAMENTO_TK_OK"
     ],
     ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "lucas.alves@transmaroni.com.br"): [
@@ -141,6 +141,46 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
                 smtp.send_message(msg)
         except Exception as e:
             st.error(f"Erro ao enviar e-mail para {destinatarios}: {e}")
+
+# === Integração com SharePoint ===
+from office365.runtime.auth.authentication_context import AuthenticationContext
+from office365.sharepoint.client_context import ClientContext
+
+def gerar_payload_sharepoint(dados_checklist):
+    """Monta o payload a ser enviado para a lista do SharePoint"""
+    km_str = str(dados_checklist.get("KM_ATUAL", "0")).replace(".", "").replace(",", "")
+    try:
+        km_int = int(km_str)
+    except ValueError:
+        km_int = 0
+    return {
+        "Title": dados_checklist.get("PLACA_CAMINHAO", ""),
+        "field_0": datetime.now().isoformat(),
+        "field_2": dados_checklist.get("PLACA_CAMINHAO", ""),
+        "field_3": dados_checklist.get("PLACA_CARRETA2", ""),
+        "field_4": dados_checklist.get("MOTORISTA", ""),
+        "field_5": dados_checklist.get("VISTORIADOR", ""),
+        "field_6": km_int,
+        "field_7": dados_checklist.get("TIPO_VEICULO", ""),
+        "field_8": dados_checklist.get("CARRETA_2", ""),
+        "field_9": dados_checklist.get("OBSERVACOES", "")
+    }
+
+def enviar_para_sharepoint(payload):
+    """Envia os dados do checklist para a lista do SharePoint"""
+    site_url = "https://grupotransmaroni.sharepoint.com/sites/MCDMANUTENOCORPORATIVADIGITAL"
+    username = "lucas.alves@transmaroni.com.br"
+    password = "Maroni@23"
+    list_name = "SBD Checklist Manutenção Oficial"
+
+    ctx_auth = AuthenticationContext(site_url)
+    if ctx_auth.acquire_token_for_user(username, password):
+        ctx = ClientContext(site_url, ctx_auth)
+        target_list = ctx.web.lists.get_by_title(list_name)
+        item = target_list.add_item(payload)
+        ctx.execute_query()
+    else:
+        raise Exception("Falha na autenticação com o SharePoint")
 
 # -------------------
 # ETAPA 1
@@ -359,7 +399,14 @@ elif st.session_state.etapa == 3:
                     buffer_zip
                 )
 
-                st.success("Checklist concluído e e-mails enviados! Reiniciando...")
+                # ===== Envia para o SharePoint =====
+                try:
+                    payload = gerar_payload_sharepoint(st.session_state.dados)
+                    enviar_para_sharepoint(payload)
+                    st.success("Checklist concluído, e-mails enviados e dados enviados ao SharePoint! Reiniciando...")
+                except Exception as e:
+                    st.warning(f"Checklist concluído e e-mails enviados, mas NÃO foi salvo no SharePoint: {e}")
+
                 time.sleep(2)
                 st.session_state.clear()
                 st.session_state.etapa = 1
