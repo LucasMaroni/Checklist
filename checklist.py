@@ -168,10 +168,10 @@ def gerar_payload_sharepoint(dados_checklist):
 
 def enviar_para_sharepoint(payload):
     """Envia os dados do checklist para a lista do SharePoint"""
-    site_url = "https://grupotransmaroni.sharepoint.com/sites/MCDMANUTENOCORPORATIVADIGITAL"
-    username = "lucas.alves@transmaroni.com.br"
-    password = "Maroni@23"
-    list_name = "SBD Checklist Manutenção Oficial"
+    site_url = os.getenv("SP_SITE_URL")
+    username = os.getenv("SP_USER")
+    password = os.getenv("SP_PASS")
+    list_name = os.getenv("SP_LIST_NAME")
 
     ctx_auth = AuthenticationContext(site_url)
     if ctx_auth.acquire_token_for_user(username, password):
