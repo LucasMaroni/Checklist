@@ -47,10 +47,10 @@ RESPONSAVEIS = {
         "VAZAMENTO_AR_OK", "PNEUS_OK", "PARABRISA_OK", "ILUMINACAO_OK", "FAIXAS_REFLETIVAS_OK",
         "FALHAS_PAINEL_OK"
     ],
-    ("lucas.alves@transmaroni.com.br",): [
+    ("lucas.alves@transmaroni.com.br", "tiago.ribeiro@transmaroni.com.br"): [
         "FUNCIONAMENTO_TK_OK"
     ],
-    ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br"): [
+    ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "lucas.alves@transmaroni.com.br"): [
         "TACOGRAFO_OK"
     ],
     ("wesley.assumpcao@transmaroni.com.br", "bruna.silva@transmaroni.com.br", "alex.franca@transmaroni.com.br"): [
@@ -88,7 +88,7 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
             continue
 
         msg = EmailMessage()
-        msg["Subject"] = f"[Checklist] Itens a verificar - {st.session_state.dados.get('PLACA_CAMINHAO','')}"
+        msg["Subject"] = f" CHECKLIST DE MANUTENÇÃO - {st.session_state.dados.get('PLACA_CAMINHAO','')}"
         msg["From"] = os.getenv("EMAIL_USER")
         msg["To"] = ", ".join(destinatarios)
 
@@ -101,7 +101,6 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
             f"O veículo {st.session_state.dados.get('PLACA_CAMINHAO','')} foi verificado em seu CHECKLIST.\n"
             f"Os seguintes itens foram vistoriados e precisam ser encaminhados para manutenção:\n\n"
             f"{itens_texto}\n\n"
-            "Segue a ficha técnica em anexo, as fotos da etapa 2 em pasta compactada e as fotos dos itens NÃO OK.\n\n"
             "Atenciosamente,\nSistema de Checklist"
         )
 
@@ -240,7 +239,6 @@ elif st.session_state.etapa == 2:
             st.session_state.etapa = 3
         else:
             st.warning("Envie no mínimo 4 imagens.")
-
 # -------------------
 # ETAPA 3
 # -------------------
