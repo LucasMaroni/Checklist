@@ -251,7 +251,9 @@ if st.session_state.etapa == 1:
         "SOTREC",
         "FRIGO",
         "UNILEVER",
-        "BAÚ"
+        "BAÚ",
+        "PÁTIO",
+        "OUTROS"
     ]
     st.session_state.dados['OPERACAO'] = st.selectbox("Operação", operacoes)
 
