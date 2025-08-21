@@ -47,7 +47,7 @@ RESPONSAVEIS = {
         "VAZAMENTO_AR_OK", "PNEUS_OK", "PARABRISA_OK", "ILUMINACAO_OK", "FAIXAS_REFLETIVAS_OK",
         "FALHAS_PAINEL_OK"
     ],
-    ("lucas.alves@transmaroni.com.br",): [
+    ("lucas.alves@transmaroni.com.br", "henrique.araujo@transmaroni.com.br", "amanda.soares@transmaroni.com.br",): [
         "FUNCIONAMENTO_TK_OK"
     ],
     ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "lucas.alves@transmaroni.com.br"): [
@@ -146,6 +146,38 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
 from office365.runtime.auth.authentication_context import AuthenticationContext
 from office365.sharepoint.client_context import ClientContext
 
+# Mapeamento dos itens para os nomes internos do SharePoint
+CHECKLIST_TO_SHAREPOINT = {
+    "VAZAMENTO_OLEO_MOTOR": "VAZAMENTODE_x00d3_LEOMOTOR",
+    "VAZAMENTO_AGUA_MOTOR": "VAZAMENTODE_x00c1_GUAMOTOR",
+    "OLEO_MOTOR_OK": "N_x00cd_VELDE_x00d3_LEODEMOTOR",
+    "ARREFECIMENTO_OK": "N_x00cd_VELDOL_x00cd_QUIDODEARRE",
+    "OLEO_CAMBIO_OK": "VAZAMENTODE_x00d3_LEOC_x00c3_MBI",
+    "OLEO_DIFERENCIAL_OK": "VAZAMENTODE_x00d3_LEODIFERENCIAL",
+    "DIESEL_OK": "VAZAMENTODEDIESEL",
+    "GNV_OK": "VAZAMENTODEGNV",
+    "OLEO_CUBOS_OK": "VAZAMENTODE_x00d3_LEOCUBOS",
+    "VAZAMENTO_AR_OK": "VAZAMENTODEAR",
+    "PNEUS_OK": "PNEUSAVARIADOS",
+    "PARABRISA_OK": "PARA_x002d_BRISA",
+    "ILUMINACAO_OK": "ILUMINA_x00c7__x00c3_O",
+    "FAIXAS_REFLETIVAS_OK": "FAIXASREFLETIVAS",
+    "FALHAS_PAINEL_OK": "PRESEN_x00c7_ADEFALHASNOPAINEL",
+    "FUNCIONAMENTO_TK_OK": "FUNCIONAMENTOTK",
+    "TACOGRAFO_OK": "FUNCIONAMENTOTAC_x00d3_GRAFO",
+    "FUNILARIA_OK": "ITENSAVARIADOSPARAFUNIL_x00c1_RI",
+    "CÂMERA_COLUNALD": "C_x00c2_MERACOLUNALADODIREITO",
+    "CÂMERA_COLUNALE": "C_x00c2_MERACOLUNALADOESQUERDO",
+    "CÂMERA_DEFLETORLD": "C_x00c2_MERADEFLETORLADODIREITO",
+    "CÂMERA_DEFLETORLE": "C_x00c2_MERADEFLETORLADOESQUERDO",
+    "CÂMERA_PARABRISA": "C_x00c2_MERADOPARABRISA",
+    "CÂMERACOLUNA_LD": "IMAGEMDIGITALC_x00c2_MERACOLUNAL",
+    "CÂMERACOLUNA_LE": "IMAGEMDIGITALC_x00c2_MERACOLUNAL0",
+    "CÂMERADEFLETOR_LD": "IMAGEMDIGITALC_x00c2_MERADEFLETO",
+    "CÂMERADEFLETOR_LE": "IMAGEMDIGITALC_x00c2_MERADEFLETO0",
+    # Adicione outros mapeamentos se necessário
+}
+
 def gerar_payload_sharepoint(dados_checklist):
     """Monta o payload a ser enviado para a lista do SharePoint"""
     km_str = str(dados_checklist.get("KM_ATUAL", "0")).replace(".", "").replace(",", "")
@@ -153,18 +185,37 @@ def gerar_payload_sharepoint(dados_checklist):
         km_int = int(km_str)
     except ValueError:
         km_int = 0
-    return {
-        "Title": dados_checklist.get("PLACA_CAMINHAO", ""),
+
+    def upper_or_empty(val):
+        return str(val).upper() if val else ""
+
+    # Determina o tipo de carreta para o SharePoint
+    tipo_carreta = ""
+    if dados_checklist.get("CARRETA_2") == "X":
+        tipo_carreta = "2 EIXOS"
+    elif dados_checklist.get("CARRETA_3") == "X":
+        tipo_carreta = "3 EIXOS"
+
+    payload = {
+        "Title": upper_or_empty(dados_checklist.get("PLACA_CAMINHAO", "")),
         "field_0": datetime.now().isoformat(),
-        "field_2": dados_checklist.get("PLACA_CAMINHAO", ""),
-        "field_3": dados_checklist.get("PLACA_CARRETA2", ""),
-        "field_4": dados_checklist.get("MOTORISTA", ""),
-        "field_5": dados_checklist.get("VISTORIADOR", ""),
+        "field_2": upper_or_empty(dados_checklist.get("PLACA_CARRETA1", "")),
+        "field_3": upper_or_empty(dados_checklist.get("PLACA_CARRETA2", "")),
+        "field_4": upper_or_empty(dados_checklist.get("MOTORISTA", "")),
+        "field_5": upper_or_empty(dados_checklist.get("VISTORIADOR", "")),
         "field_6": km_int,
-        "field_7": dados_checklist.get("TIPO_VEICULO", ""),
-        "field_8": dados_checklist.get("CARRETA_2", ""),
-        "field_9": dados_checklist.get("OBSERVACOES", "")
+        "field_7": upper_or_empty(dados_checklist.get("TIPO_VEICULO", "")),
+        "field_8": upper_or_empty(tipo_carreta),
+        "field_9": upper_or_empty(dados_checklist.get("OBSERVACOES", "")),
+        "OPERA_x00c7__x00c3_O": upper_or_empty(dados_checklist.get("OPERACAO", "")),  # <-- Corrigido aqui!
     }
+
+    # Adiciona os itens do checklist usando o nome interno do SharePoint, em maiúsculo
+    for chave, internal_name in CHECKLIST_TO_SHAREPOINT.items():
+        valor = dados_checklist.get(chave, "")
+        payload[internal_name] = upper_or_empty(valor)
+
+    return payload
 
 def enviar_para_sharepoint(payload):
     """Envia os dados do checklist para a lista do SharePoint"""
@@ -191,14 +242,20 @@ if st.session_state.etapa == 1:
     st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual")
     st.session_state.dados['MOTORISTA'] = st.text_input("Motorista")
 
-    try:
-        from ctypes import windll, create_unicode_buffer
-        buffer = create_unicode_buffer(1024)
-        windll.secur32.GetUserNameExW(3, buffer, (n := len(buffer)))
-        nome_completo = buffer.value
-    except:
-        nome_completo = getpass.getuser()   
-    st.session_state.dados['VISTORIADOR'] = nome_completo
+    # Campo OPERAÇÃO
+    operacoes = [
+        "MERCADO - LIVRE",
+        "BITREM",
+        "BIG",
+        "CARREFOUR",
+        "SOTREC",
+        "FRIGO",
+        "UNILEVER",
+        "BAÚ"
+    ]
+    st.session_state.dados['OPERACAO'] = st.selectbox("Operação", operacoes)
+
+    st.session_state.dados['VISTORIADOR'] = "CLEBER QUELSON BEZERRA DE MENEZES"
 
     tipo_veiculo = st.radio("Tipo de veículo", ["CAVALO", "RÍGIDO"])
     st.session_state.dados['TIPO_VEICULO'] = tipo_veiculo
