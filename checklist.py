@@ -64,6 +64,16 @@ RESPONSAVEIS = {
         # Itens IMAGEM DIGITAL solicitados (devem existir no DOCX como {{...}})
         "CÂMERACOLUNA_LD", "CÂMERACOLUNA_LE", "CÂMERADEFLETOR_LD", "CÂMERADEFLETOR_LE"
     ],
+    (
+        "manutencao.frota@transmaroni.com.br",
+        "ruberval.silva@transmaroni.com.br",
+        "michele.silva@transmaroni.com.br",
+        "enielle.argolo@transmaroni.com.br",
+        "jose.oliveira@transmaroni.com.br",
+        "eric.souza@transmaroni.com.br",
+    ): [
+        "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI"
+    ],
 }
 
 # -------------------
@@ -84,7 +94,7 @@ EMAILS_OPERACOES = {
     "BITREM": ["bitremgrupo@transmaroni.com.br"],
     "FRIGO": ["frigogrupo@transmaroni.com.br"],
     "BIMBO": ["adm.bimbo@transmaroni.com.br"],
-    "BAÚ": ["bau.es@transmaroni.com.br"]
+    "BAÚ": ["baugrupo@transmaroni.com.br"]
 }
 
 def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, buffer_word, buffer_zip):
@@ -193,6 +203,7 @@ CHECKLIST_TO_SHAREPOINT = {
     "CÂMERADEFLETOR_LD": "IMAGEMDIGITALC_x00c2_MERADEFLETO",
     "CÂMERADEFLETOR_LE": "IMAGEMDIGITALC_x00c2_MERADEFLETO0",
     # Adicione outros mapeamentos se necessário
+    "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "PARAFUSOSUSPENS_x00c3_OVANDERLEI",  # <-- Adicionado
 }
 
 def gerar_payload_sharepoint(dados_checklist):
@@ -269,9 +280,7 @@ if st.session_state.etapa == 1:
         "FRIGO",
         "BIMBO",
         "UNILEVER",
-        "BAÚ",
-        "OUTROS",
-        "PÁTIO"
+        "BAÚ"
     ]
     st.session_state.dados['OPERACAO'] = st.selectbox("Operação", operacoes)
 
@@ -391,6 +400,7 @@ elif st.session_state.etapa == 3:
         "CÂMERACOLUNA_LE": "Imagem digital câmera coluna LE",
         "CÂMERADEFLETOR_LD": "Imagem digital câmera defletor LD",
         "CÂMERADEFLETOR_LE": "Imagem digital câmera defletor LE",
+        "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "Parafuso suspensão Vanderleia Facchini",  # <-- Adicionado
     }
 
     for chave, descricao in checklist_itens.items():
