@@ -40,6 +40,7 @@ RESPONSAVEIS = {
         "sarah.ferreira@transmaroni.com.br",
         "enielle.argolo@transmaroni.com.br",
         "michele.silva@transmaroni.com.br",
+        "manutencao.frota@transmaroni.com.br",
         "sabrina.silva@transmaroni.com.br"
     ): [
         "VAZAMENTO_OLEO_MOTOR", "VAZAMENTO_AGUA_MOTOR", "OLEO_MOTOR_OK", "ARREFECIMENTO_OK",
@@ -47,17 +48,17 @@ RESPONSAVEIS = {
         "VAZAMENTO_AR_OK", "PNEUS_OK", "PARABRISA_OK", "ILUMINACAO_OK", "FAIXAS_REFLETIVAS_OK",
         "FALHAS_PAINEL_OK"
     ],
-    ("lucas.alves@transmaroni.com.br", "henrique.araujo@transmaroni.com.br", "amanda.soares@transmaroni.com.br",): [
+    ("lucas.alves@transmaroni.com.br", "henrique.araujo@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "manutencao.frota@transmaroni.com.br",): [
         "FUNCIONAMENTO_TK_OK"
     ],
-    ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "lucas.alves@transmaroni.com.br"): [
+    ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", "lucas.alves@transmaroni.com.br", ): [
         "TACOGRAFO_OK"
     ],
-    ("wesley.assumpcao@transmaroni.com.br", "bruna.silva@transmaroni.com.br", "alex.franca@transmaroni.com.br"): [
+    ("wesley.assumpcao@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", "bruna.silva@transmaroni.com.br", "alex.franca@transmaroni.com.br", ): [
         "FUNILARIA_OK"
     ],
     # Grupo de câmeras e imagem digital
-    ("mirella.trindade@transmaroni.com.br",): [
+    ("mirella.trindade@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
         "CÂMERA_COLUNALD", "CÂMERA_COLUNALE", "CÂMERA_DEFLETORLD", "CÂMERA_DEFLETORLE",
         "CÂMERA_PARABRISA",
         # Itens IMAGEM DIGITAL solicitados (devem existir no DOCX como {{...}})
@@ -77,20 +78,36 @@ def gerar_zip_imagens(imagens):
     buffer_zip.seek(0)
     return buffer_zip
 
+# Mapeamento de e-mails das operações
+EMAILS_OPERACOES = {
+    "MERCADO - LIVRE": ["meli.operacional@transmaroni.com.br", "programacaoecommerce@transmaroni.com.br", "lucas.alves@transmaroni.com.br"],
+    "BITREM": ["bitremgrupo@transmaroni.com.br"],
+    "FRIGO": ["frigogrupo@transmaroni.com.br"],
+    "BIMBO": ["adm.bimbo@transmaroni.com.br"],
+    "BAÚ": ["bau.es@transmaroni.com.br"]
+}
+
 def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, buffer_word, buffer_zip):
     """Envia os e-mails para os responsáveis de cada item com Word, ZIP e fotos dos itens"""
     hora_atual = datetime.now().hour
     saudacao = "Bom dia" if hora_atual < 12 else "Boa tarde"
+
+    # Adiciona e-mails das operações conforme selecionado
+    operacao = st.session_state.dados.get("OPERACAO", "")
+    emails_operacao = EMAILS_OPERACOES.get(operacao, [])
 
     for destinatarios, itens_responsaveis in RESPONSAVEIS.items():
         itens_do_grupo = [i for i in itens_nao_ok if i in itens_responsaveis]
         if not itens_do_grupo:
             continue
 
+        # Junta os e-mails do grupo com os da operação (sem duplicar)
+        todos_destinatarios = list(set(destinatarios + tuple(emails_operacao)))
+
         msg = EmailMessage()
         msg["Subject"] = f" CHECKLIST DE MANUTENÇÃO - {st.session_state.dados.get('PLACA_CAMINHAO','')}"
         msg["From"] = os.getenv("EMAIL_USER")
-        msg["To"] = ", ".join(destinatarios)
+        msg["To"] = ", ".join(todos_destinatarios)
 
         itens_texto = "\n".join([f"- {checklist_itens[i]}" for i in itens_do_grupo])
         msg.set_content(
@@ -140,7 +157,7 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
                 smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
                 smtp.send_message(msg)
         except Exception as e:
-            st.error(f"Erro ao enviar e-mail para {destinatarios}: {e}")
+            st.error(f"Erro ao enviar e-mail para {todos_destinatarios}: {e}")
 
 # === Integração com SharePoint ===
 from office365.runtime.auth.authentication_context import AuthenticationContext
@@ -250,10 +267,9 @@ if st.session_state.etapa == 1:
         "CARREFOUR",
         "SOTREC",
         "FRIGO",
+        "BIMBO",
         "UNILEVER",
-        "BAÚ",
-        "PÁTIO",
-        "OUTROS"
+        "BAÚ"
     ]
     st.session_state.dados['OPERACAO'] = st.selectbox("Operação", operacoes)
 
