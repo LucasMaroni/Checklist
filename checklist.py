@@ -267,6 +267,14 @@ def enviar_para_sharepoint(payload):
 if st.session_state.etapa == 1:
     st.subheader("Dados do Veículo e Condutor")
     st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8)
+
+    # Inicia o temporizador quando o usuário começa a digitar
+    if (
+        "start_time" not in st.session_state
+        and st.session_state.dados['PLACA_CAMINHAO']
+    ):
+        st.session_state.start_time = time.time()
+
     st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual")
     st.session_state.dados['MOTORISTA'] = st.text_input("Motorista")
 
@@ -281,8 +289,8 @@ if st.session_state.etapa == 1:
         "BIMBO",
         "UNILEVER",
         "BAÚ",
-        "PÁTIO",
-        "OUTROS"
+        "OUTROS",
+        "PÁTIO"
     ]
     st.session_state.dados['OPERACAO'] = st.selectbox("Operação", operacoes)
 
@@ -488,9 +496,18 @@ elif st.session_state.etapa == 3:
                     buffer_zip
                 )
 
+                # Calcula o tempo de execução do checklist
+                tempo_execucao = ""
+                if "start_time" in st.session_state:
+                    segundos = int(time.time() - st.session_state.start_time)
+                    minutos = segundos // 60
+                    segundos_restantes = segundos % 60
+                    tempo_execucao = f"{minutos:02d}:{segundos_restantes:02d}"
+
                 # ===== Envia para o SharePoint =====
                 try:
                     payload = gerar_payload_sharepoint(st.session_state.dados)
+                    payload["TIMEEXECU_x00c7__x00c3_O"] = tempo_execucao  # Adiciona tempo ao payload
                     enviar_para_sharepoint(payload)
                     st.success("Checklist concluído, e-mails enviados e dados enviados ao SharePoint! Reiniciando...")
                 except Exception as e:
