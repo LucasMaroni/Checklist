@@ -6,3 +6,4 @@ python-dotenv
 pandas
 numpy
 office365-rest-python-client
+openpyxl
