@@ -11,6 +11,25 @@ from dotenv import load_dotenv
 import getpass
 import zipfile
 import time
+import pandas as pd
+import re
+
+@st.cache_resource
+def carregar_placas_validas():
+    try:
+        df_placas = pd.read_excel("placas.xlsx")
+        return set(df_placas['PLACA'].str.upper().str.strip())
+    except Exception as e:
+        st.warning(f"Não foi possível carregar a lista de placas: {e}")
+        return set()
+
+# Carregar lista de placas válidas ANTES de qualquer uso
+PLACAS_VALIDAS = set()
+try:
+    df_placas = pd.read_excel("placas.xlsx")  # ajuste o nome do arquivo conforme necessário
+    PLACAS_VALIDAS = set(df_placas['PLACA'].str.upper().str.strip())
+except Exception as e:
+    st.warning(f"Não foi possível carregar a lista de placas: {e}")
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -202,8 +221,7 @@ CHECKLIST_TO_SHAREPOINT = {
     "CÂMERACOLUNA_LE": "IMAGEMDIGITALC_x00c2_MERACOLUNAL0",
     "CÂMERADEFLETOR_LD": "IMAGEMDIGITALC_x00c2_MERADEFLETO",
     "CÂMERADEFLETOR_LE": "IMAGEMDIGITALC_x00c2_MERADEFLETO0",
-    # Adicione outros mapeamentos se necessário
-    "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "PARAFUSOSUSPENS_x00c3_OVANDERLEI",  # <-- Adicionado
+    "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "PARAFUSOSUSPENS_x00c3_OVANDERLEI",
 }
 
 def gerar_payload_sharepoint(dados_checklist):
@@ -217,7 +235,7 @@ def gerar_payload_sharepoint(dados_checklist):
     def upper_or_empty(val):
         return str(val).upper() if val else ""
 
-    # Determina o tipo de carreta para o SharePoint
+
     tipo_carreta = ""
     if dados_checklist.get("CARRETA_2") == "X":
         tipo_carreta = "2 EIXOS"
@@ -266,7 +284,7 @@ def enviar_para_sharepoint(payload):
 # -------------------
 if st.session_state.etapa == 1:
     st.subheader("Dados do Veículo e Condutor")
-    st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=8)
+    st.session_state.dados['PLACA_CAMINHAO'] = st.text_input("Placa do Caminhão", max_chars=7)
 
     # Inicia o temporizador quando o usuário começa a digitar
     if (
@@ -274,6 +292,18 @@ if st.session_state.etapa == 1:
         and st.session_state.dados['PLACA_CAMINHAO']
     ):
         st.session_state.start_time = time.time()
+
+    placa_digitada = st.session_state.dados['PLACA_CAMINHAO'].upper().strip()
+
+    # Regex padrão Mercosul: LLLNLNN
+    padrao_mercosul = r"^[A-Z]{3}[0-9][A-Z][0-9]{2}$"
+    placa_padrao = bool(re.match(padrao_mercosul, placa_digitada))
+    placa_valida = placa_digitada in PLACAS_VALIDAS if placa_digitada else False
+
+    if placa_digitada and not placa_padrao:
+        st.warning("Placa fora do padrão Mercosul! Use o formato LLLNLNN (ex: ABC1D23).")
+    elif placa_digitada and not placa_valida:
+        st.warning("PLACA INVÁLIDA! Verifique com sua equipe de manutenção.")
 
     st.session_state.dados['KM_ATUAL'] = st.text_input("KM Atual")
     st.session_state.dados['MOTORISTA'] = st.text_input("Motorista")
@@ -339,7 +369,7 @@ if st.session_state.etapa == 1:
         st.session_state.dados["CARRETA_2"] = ""
         st.session_state.dados["CARRETA_3"] = ""
 
-    if st.button("Avançar ➡️"):
+    if st.button("Avançar ➡️", disabled=not (placa_padrao and placa_valida)):
         if all([
             st.session_state.dados['PLACA_CAMINHAO'],
             st.session_state.dados['KM_ATUAL'],
