@@ -578,7 +578,7 @@ elif st.session_state.etapa == 3:
                 try:
                     sucesso = salvar_na_planilha_excel(st.session_state.dados, tempo_execucao)
                     if sucesso:
-                        st.success("Checklist concluído, e-mails enviados e dados salvos na planilha Excel! Reiniciando...")
+                        st.success("Checklist concluído, e-mails enviados")
                     else:
                         st.warning("Checklist concluído e e-mails enviados, mas NÃO foi salvo na planilha Excel.")
                 except Exception as e:
