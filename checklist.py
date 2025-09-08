@@ -8,11 +8,13 @@ from io import BytesIO
 import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
-import getpass
 import zipfile
 import time
 import pandas as pd
 import re
+import openpyxl
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 @st.cache_resource
 def carregar_placas_validas():
@@ -188,96 +190,134 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
         except Exception as e:
             st.error(f"Erro ao enviar e-mail para {todos_destinatarios}: {e}")
 
-# === Integração com SharePoint ===
-from office365.runtime.auth.authentication_context import AuthenticationContext
-from office365.sharepoint.client_context import ClientContext
-
-# Mapeamento dos itens para os nomes internos do SharePoint
-CHECKLIST_TO_SHAREPOINT = {
-    "VAZAMENTO_OLEO_MOTOR": "VAZAMENTODE_x00d3_LEOMOTOR",
-    "VAZAMENTO_AGUA_MOTOR": "VAZAMENTODE_x00c1_GUAMOTOR",
-    "OLEO_MOTOR_OK": "N_x00cd_VELDE_x00d3_LEODEMOTOR",
-    "ARREFECIMENTO_OK": "N_x00cd_VELDOL_x00cd_QUIDODEARRE",
-    "OLEO_CAMBIO_OK": "VAZAMENTODE_x00d3_LEOC_x00c3_MBI",
-    "OLEO_DIFERENCIAL_OK": "VAZAMENTODE_x00d3_LEODIFERENCIAL",
-    "DIESEL_OK": "VAZAMENTODEDIESEL",
-    "GNV_OK": "VAZAMENTODEGNV",
-    "OLEO_CUBOS_OK": "VAZAMENTODE_x00d3_LEOCUBOS",
-    "VAZAMENTO_AR_OK": "VAZAMENTODEAR",
-    "PNEUS_OK": "PNEUSAVARIADOS",
-    "PARABRISA_OK": "PARA_x002d_BRISA",
-    "ILUMINACAO_OK": "ILUMINA_x00c7__x00c3_O",
-    "FAIXAS_REFLETIVAS_OK": "FAIXASREFLETIVAS",
-    "FALHAS_PAINEL_OK": "PRESEN_x00c7_ADEFALHASNOPAINEL",
-    "FUNCIONAMENTO_TK_OK": "FUNCIONAMENTOTK",
-    "TACOGRAFO_OK": "FUNCIONAMENTOTAC_x00d3_GRAFO",
-    "FUNILARIA_OK": "ITENSAVARIADOSPARAFUNIL_x00c1_RI",
-    "CÂMERA_COLUNALD": "C_x00c2_MERACOLUNALADODIREITO",
-    "CÂMERA_COLUNALE": "C_x00c2_MERACOLUNALADOESQUERDO",
-    "CÂMERA_DEFLETORLD": "C_x00c2_MERADEFLETORLADODIREITO",
-    "CÂMERA_DEFLETORLE": "C_x00c2_MERADEFLETORLADOESQUERDO",
-    "CÂMERA_PARABRISA": "C_x00c2_MERADOPARABRISA",
-    "CÂMERACOLUNA_LD": "IMAGEMDIGITALC_x00c2_MERACOLUNAL",
-    "CÂMERACOLUNA_LE": "IMAGEMDIGITALC_x00c2_MERACOLUNAL0",
-    "CÂMERADEFLETOR_LD": "IMAGEMDIGITALC_x00c2_MERADEFLETO",
-    "CÂMERADEFLETOR_LE": "IMAGEMDIGITALC_x00c2_MERADEFLETO0",
-    "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "PARAFUSOSUSPENS_x00c3_OVANDERLEI",
+# Mapeamento dos itens para os nomes das colunas na planilha Excel
+CHECKLIST_TO_EXCEL = {
+    "VAZAMENTO_OLEO_MOTOR": "VAZAMENTO DE ÓLEO MOTOR",
+    "VAZAMENTO_AGUA_MOTOR": "VAZAMENTO DE ÁGUA MOTOR",
+    "OLEO_MOTOR_OK": "NÍVEL DE ÓLEO DE MOTOR",
+    "ARREFECIMENTO_OK": "NÍVEL DO LÍQUIDO DE ARREFECIMENTO",
+    "OLEO_CAMBIO_OK": "VAZAMENTO DE ÓLEO CÃMBIO",
+    "OLEO_DIFERENCIAL_OK": "VAZAMENTO DE ÓLEO DIFERENCIAL",
+    "DIESEL_OK": "VAZAMENTO DE DIESEL",
+    "GNV_OK": "VAZAMENTO DE GNV",
+    "OLEO_CUBOS_OK": "VAZAMENTO DE ÓLEO CUBOS",
+    "VAZAMENTO_AR_OK": "VAZAMENTO DE AR",
+    "PNEUS_OK": "PNEUS AVARIADOS",
+    "PARABRISA_OK": "PARA-BRISA",
+    "ILUMINACAO_OK": "ILUMINAÇÃO",
+    "FAIXAS_REFLETIVAS_OK": "FAIXAS REFLETIVAS",
+    "FALHAS_PAINEL_OK": "PRESENÇA DE FALHAS NO PAINEL",
+    "FUNCIONAMENTO_TK_OK": "FUNCIONAMENTO TK",
+    "TACOGRAFO_OK": "FUNCIONAMENTO TACÓGRAFO",
+    "FUNILARIA_OK": "ITENS AVARIADOS PARA FUNILÁRIA",
+    "CÂMERA_COLUNALD": "CÂMERA COLUNA LADO DIREITO",
+    "CÂMERA_COLUNALE": "CÂMERA COLUNA LADO ESQUERDO",
+    "CÂMERA_DEFLETORLD": "CÂMERA DEFLETOR LADO DIREITO",
+    "CÂMERA_DEFLETORLE": "CÂMERA DEFLETOR LADO ESQUERDO",
+    "CÂMERA_PARABRISA": "CÂMERA DO PARABRISA",
+    "CÂMERACOLUNA_LD": "IMAGEM DIGITAL CÂMERA COLUNA LD",
+    "CÂMERACOLUNA_LE": "IMAGEM DIGITAL CÂMERA COLUNA LE",
+    "CÂMERADEFLETOR_LD": "IMAGEM DIGITAL CÂMERA DEFLETOR LD",
+    "CÂMERADEFLETOR_LE": "IMAGEM DIGITAL CÂMERA DEFLETOR LE",
+    "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "PARAFUSO SUSPENSÃO VANDERLEIA FACCHINI",
 }
 
-def gerar_payload_sharepoint(dados_checklist):
-    """Monta o payload a ser enviado para a lista do SharePoint"""
-    km_str = str(dados_checklist.get("KM_ATUAL", "0")).replace(".", "").replace(",", "")
+# Mapeamento das colunas da planilha Excel
+EXCEL_COLUMNS = {
+    "ID": "A",
+    "Title": "B",
+    "OPERAÇÃO": "C",
+    "DATA E HORA": "D",
+    "PLACA CAMINHÃO 1": "E",
+    "PLACA CAMINHÃO 2": "F",
+    "TIME EXECUÇÃO": "G",
+    "MOTORISTA": "H",
+    "VISTORIADOR": "I",
+    "KM ATUAL": "J",
+    "TIPO DE VEÍCULO": "K",
+    "TIPO DE CARRETA": "L",
+    "VAZAMENTO DE ÓLEO MOTOR": "M",
+    "VAZAMENTO DE ÁGUA MOTOR": "N",
+    "ITENS AVARIADOS PARA FUNILÁRIA": "O",
+    "CÂMERA COLUNA LADO ESQUERDO": "P",
+    "CÂMERA DEFLETOR LADO DIREITO": "Q",
+    "CÂMERA COLUNA LADO DIREITO": "R",
+    "NÍVEL DE ÓLEO DE MOTOR": "S",
+    "FUNCIONAMENTO TACÓGRAFO": "T",
+    "FUNCIONAMENTO TK": "U",
+    "PRESENÇA DE FALHAS NO PAINEL": "V",
+    "FAIXAS REFLETIVAS": "W",
+    "ILUMINAÇÃO": "X",
+    "PNEUS AVARIADOS": "Y",
+    "PARA-BRISA": "Z",
+    "VAZAMENTO DE AR": "AA",
+    "VAZAMENTO DE ÓLEO DIFERENCIAL": "AB",
+    "VAZAMENTO DE ÓLEO CUBOS": "AC",
+    "VAZAMENTO DE GNV": "AD",
+    "VAZAMENTO DE DIESEL": "AE",
+    "CÂMERA DEFLETOR LADO ESQUERDO": "AF",
+    "IMAGEM DIGITAL CÂMERA DEFLETOR LE": "AG",
+    "IMAGEM DIGITAL CÂMERA DEFLETOR LD": "AH",
+    "IMAGEM DIGITAL CÂMERA COLUNA LE": "AI",
+    "IMAGEM DIGITAL CÂMERA COLUNA LD": "AJ",
+    "CÂMERA DO PARABRISA": "AK",
+    "PARAFUSO SUSPENSÃO VANDERLEIA FACCHINI": "AL",
+    "NÍVEL DO LÍQUIDO DE ARREFECIMENTO": "AM",
+    "VAZAMENTO DE ÓLEO CÃMBIO": "AN"
+}
+
+def salvar_na_planilha_excel(dados_checklist, tempo_execucao):
+    """Salva os dados do checklist na planilha Excel"""
     try:
-        km_int = int(km_str)
-    except ValueError:
-        km_int = 0
-
-    def upper_or_empty(val):
-        return str(val).upper() if val else ""
-
-
-    tipo_carreta = ""
-    if dados_checklist.get("CARRETA_2") == "X":
-        tipo_carreta = "2 EIXOS"
-    elif dados_checklist.get("CARRETA_3") == "X":
-        tipo_carreta = "3 EIXOS"
-
-    payload = {
-        "Title": upper_or_empty(dados_checklist.get("PLACA_CAMINHAO", "")),
-        "field_0": datetime.now().isoformat(),
-        "field_2": upper_or_empty(dados_checklist.get("PLACA_CARRETA1", "")),
-        "field_3": upper_or_empty(dados_checklist.get("PLACA_CARRETA2", "")),
-        "field_4": upper_or_empty(dados_checklist.get("MOTORISTA", "")),
-        "field_5": upper_or_empty(dados_checklist.get("VISTORIADOR", "")),
-        "field_6": km_int,
-        "field_7": upper_or_empty(dados_checklist.get("TIPO_VEICULO", "")),
-        "field_8": upper_or_empty(tipo_carreta),
-        "field_9": upper_or_empty(dados_checklist.get("OBSERVACOES", "")),
-        "OPERA_x00c7__x00c3_O": upper_or_empty(dados_checklist.get("OPERACAO", "")),  # <-- Corrigido aqui!
-    }
-
-    # Adiciona os itens do checklist usando o nome interno do SharePoint, em maiúsculo
-    for chave, internal_name in CHECKLIST_TO_SHAREPOINT.items():
-        valor = dados_checklist.get(chave, "")
-        payload[internal_name] = upper_or_empty(valor)
-
-    return payload
-
-def enviar_para_sharepoint(payload):
-    """Envia os dados do checklist para a lista do SharePoint"""
-    site_url = os.getenv("SP_SITE_URL")
-    username = os.getenv("SP_USER")
-    password = os.getenv("SP_PASS")
-    list_name = os.getenv("SP_LIST_NAME")
-
-    ctx_auth = AuthenticationContext(site_url)
-    if ctx_auth.acquire_token_for_user(username, password):
-        ctx = ClientContext(site_url, ctx_auth)
-        target_list = ctx.web.lists.get_by_title(list_name)
-        item = target_list.add_item(payload)
-        ctx.execute_query()
-    else:
-        raise Exception("Falha na autenticação com o SharePoint")
+        # Carregar a planilha existente
+        workbook = load_workbook("sbd-checklists.xlsx")
+        sheet = workbook.active
+        
+        # Encontrar a próxima linha vazia
+        next_row = sheet.max_row + 1
+        
+        # Gerar ID único (próximo número sequencial)
+        sheet[f"A{next_row}"] = next_row - 1  # ID
+        
+        # Preencher os dados básicos
+        sheet[f"B{next_row}"] = dados_checklist.get("PLACA_CAMINHAO", "").upper()  # Title
+        sheet[f"C{next_row}"] = dados_checklist.get("OPERACAO", "")  # OPERAÇÃO
+        sheet[f"D{next_row}"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # DATA E HORA
+        sheet[f"E{next_row}"] = dados_checklist.get("PLACA_CAMINHAO", "").upper()  # PLACA CAMINHÃO 1
+        sheet[f"F{next_row}"] = dados_checklist.get("PLACA_CARRETA2", "").upper()  # PLACA CAMINHÃO 2
+        sheet[f"G{next_row}"] = tempo_execucao  # TIME EXECUÇÃO
+        sheet[f"H{next_row}"] = dados_checklist.get("MOTORISTA", "").upper()  # MOTORISTA
+        sheet[f"I{next_row}"] = dados_checklist.get("VISTORIADOR", "").upper()  # VISTORIADOR
+        
+        # KM ATUAL (converter para número)
+        km_str = str(dados_checklist.get("KM_ATUAL", "0")).replace(".", "").replace(",", "")
+        try:
+            sheet[f"J{next_row}"] = int(km_str)
+        except ValueError:
+            sheet[f"J{next_row}"] = 0
+        
+        sheet[f"K{next_row}"] = dados_checklist.get("TIPO_VEICULO", "").upper()  # TIPO DE VEÍCULO
+        
+        # TIPO DE CARRETA
+        if dados_checklist.get("CARRETA_2") == "X":
+            sheet[f"M{next_row}"] = "2 EIXOS"
+        elif dados_checklist.get("CARRETA_3") == "X":
+            sheet[f"M{next_row}"] = "3 EIXOS"
+        
+        # Preencher os itens do checklist
+        for chave, coluna_excel in CHECKLIST_TO_EXCEL.items():
+            valor = dados_checklist.get(chave, "")
+            if coluna_excel in EXCEL_COLUMNS:
+                coluna = EXCEL_COLUMNS[coluna_excel]
+                sheet[f"{coluna}{next_row}"] = valor.upper() if valor else ""
+        
+        # Salvar a planilha
+        workbook.save("sbd-checklists.xlsx")
+        return True
+        
+    except Exception as e:
+        st.error(f"Erro ao salvar na planilha Excel: {e}")
+        return False
 
 # -------------------
 # ETAPA 1
@@ -534,14 +574,15 @@ elif st.session_state.etapa == 3:
                     segundos_restantes = segundos % 60
                     tempo_execucao = f"{minutos:02d}:{segundos_restantes:02d}"
 
-                # ===== Envia para o SharePoint =====
+                # ===== Salva na planilha Excel =====
                 try:
-                    payload = gerar_payload_sharepoint(st.session_state.dados)
-                    payload["TIMEEXECU_x00c7__x00c3_O"] = tempo_execucao  # Adiciona tempo ao payload
-                    enviar_para_sharepoint(payload)
-                    st.success("Checklist concluído, e-mails enviados e dados enviados ao SharePoint! Reiniciando...")
+                    sucesso = salvar_na_planilha_excel(st.session_state.dados, tempo_execucao)
+                    if sucesso:
+                        st.success("Checklist concluído, e-mails enviados e dados salvos na planilha Excel! Reiniciando...")
+                    else:
+                        st.warning("Checklist concluído e e-mails enviados, mas NÃO foi salvo na planilha Excel.")
                 except Exception as e:
-                    st.warning(f"Checklist concluído e e-mails enviados, mas NÃO foi salvo no SharePoint: {e}")
+                    st.warning(f"Checklist concluído e e-mails enviados, mas NÃO foi salvo na planilha Excel: {e}")
 
                 time.sleep(2)
                 st.session_state.clear()
