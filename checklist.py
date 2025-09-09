@@ -12,9 +12,6 @@ import zipfile
 import time
 import pandas as pd
 import re
-import openpyxl
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
 
 @st.cache_resource
 def carregar_placas_validas():
@@ -28,7 +25,7 @@ def carregar_placas_validas():
 # Carregar lista de placas válidas ANTES de qualquer uso
 PLACAS_VALIDAS = set()
 try:
-    df_placas = pd.read_excel("placas.xlsx")  # ajuste o nome do arquivo conforme necessário
+    df_placas = pd.read_excel("placas.xlsx")
     PLACAS_VALIDAS = set(df_placas['PLACA'].str.upper().str.strip())
 except Exception as e:
     st.warning(f"Não foi possível carregar a lista de placas: {e}")
@@ -190,134 +187,115 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
         except Exception as e:
             st.error(f"Erro ao enviar e-mail para {todos_destinatarios}: {e}")
 
-# Mapeamento dos itens para os nomes das colunas na planilha Excel
-CHECKLIST_TO_EXCEL = {
-    "VAZAMENTO_OLEO_MOTOR": "VAZAMENTO DE ÓLEO MOTOR",
-    "VAZAMENTO_AGUA_MOTOR": "VAZAMENTO DE ÁGUA MOTOR",
-    "OLEO_MOTOR_OK": "NÍVEL DE ÓLEO DE MOTOR",
-    "ARREFECIMENTO_OK": "NÍVEL DO LÍQUIDO DE ARREFECIMENTO",
-    "OLEO_CAMBIO_OK": "VAZAMENTO DE ÓLEO CÃMBIO",
-    "OLEO_DIFERENCIAL_OK": "VAZAMENTO DE ÓLEO DIFERENCIAL",
-    "DIESEL_OK": "VAZAMENTO DE DIESEL",
-    "GNV_OK": "VAZAMENTO DE GNV",
-    "OLEO_CUBOS_OK": "VAZAMENTO DE ÓLEO CUBOS",
-    "VAZAMENTO_AR_OK": "VAZAMENTO DE AR",
-    "PNEUS_OK": "PNEUS AVARIADOS",
-    "PARABRISA_OK": "PARA-BRISA",
-    "ILUMINACAO_OK": "ILUMINAÇÃO",
-    "FAIXAS_REFLETIVAS_OK": "FAIXAS REFLETIVAS",
-    "FALHAS_PAINEL_OK": "PRESENÇA DE FALHAS NO PAINEL",
-    "FUNCIONAMENTO_TK_OK": "FUNCIONAMENTO TK",
-    "TACOGRAFO_OK": "FUNCIONAMENTO TACÓGRAFO",
-    "FUNILARIA_OK": "ITENS AVARIADOS PARA FUNILÁRIA",
-    "CÂMERA_COLUNALD": "CÂMERA COLUNA LADO DIREITO",
-    "CÂMERA_COLUNALE": "CÂMERA COLUNA LADO ESQUERDO",
-    "CÂMERA_DEFLETORLD": "CÂMERA DEFLETOR LADO DIREITO",
-    "CÂMERA_DEFLETORLE": "CÂMERA DEFLETOR LADO ESQUERDO",
-    "CÂMERA_PARABRISA": "CÂMERA DO PARABRISA",
-    "CÂMERACOLUNA_LD": "IMAGEM DIGITAL CÂMERA COLUNA LD",
-    "CÂMERACOLUNA_LE": "IMAGEM DIGITAL CÂMERA COLUNA LE",
-    "CÂMERADEFLETOR_LD": "IMAGEM DIGITAL CÂMERA DEFLETOR LD",
-    "CÂMERADEFLETOR_LE": "IMAGEM DIGITAL CÂMERA DEFLETOR LE",
-    "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "PARAFUSO SUSPENSÃO VANDERLEIA FACCHINI",
-}
-
-# Mapeamento das colunas da planilha Excel
-EXCEL_COLUMNS = {
-    "ID": "A",
-    "Title": "B",
-    "OPERAÇÃO": "C",
-    "DATA E HORA": "D",
-    "PLACA CAMINHÃO 1": "E",
-    "PLACA CAMINHÃO 2": "F",
-    "TIME EXECUÇÃO": "G",
-    "MOTORISTA": "H",
-    "VISTORIADOR": "I",
-    "KM ATUAL": "J",
-    "TIPO DE VEÍCULO": "K",
-    "TIPO DE CARRETA": "L",
-    "VAZAMENTO DE ÓLEO MOTOR": "M",
-    "VAZAMENTO DE ÁGUA MOTOR": "N",
-    "ITENS AVARIADOS PARA FUNILÁRIA": "O",
-    "CÂMERA COLUNA LADO ESQUERDO": "P",
-    "CÂMERA DEFLETOR LADO DIREITO": "Q",
-    "CÂMERA COLUNA LADO DIREITO": "R",
-    "NÍVEL DE ÓLEO DE MOTOR": "S",
-    "FUNCIONAMENTO TACÓGRAFO": "T",
-    "FUNCIONAMENTO TK": "U",
-    "PRESENÇA DE FALHAS NO PAINEL": "V",
-    "FAIXAS REFLETIVAS": "W",
-    "ILUMINAÇÃO": "X",
-    "PNEUS AVARIADOS": "Y",
-    "PARA-BRISA": "Z",
-    "VAZAMENTO DE AR": "AA",
-    "VAZAMENTO DE ÓLEO DIFERENCIAL": "AB",
-    "VAZAMENTO DE ÓLEO CUBOS": "AC",
-    "VAZAMENTO DE GNV": "AD",
-    "VAZAMENTO DE DIESEL": "AE",
-    "CÂMERA DEFLETOR LADO ESQUERDO": "AF",
-    "IMAGEM DIGITAL CÂMERA DEFLETOR LE": "AG",
-    "IMAGEM DIGITAL CÂMERA DEFLETOR LD": "AH",
-    "IMAGEM DIGITAL CÂMERA COLUNA LE": "AI",
-    "IMAGEM DIGITAL CÂMERA COLUNA LD": "AJ",
-    "CÂMERA DO PARABRISA": "AK",
-    "PARAFUSO SUSPENSÃO VANDERLEIA FACCHINI": "AL",
-    "NÍVEL DO LÍQUIDO DE ARREFECIMENTO": "AM",
-    "VAZAMENTO DE ÓLEO CÃMBIO": "AN"
-}
-
-def salvar_na_planilha_excel(dados_checklist, tempo_execucao):
-    """Salva os dados do checklist na planilha Excel"""
+def enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, fotos_nao_ok):
+    """Envia e-mail completo para Lucas Alves com todos os dados do checklist em formato estruturado"""
+    hora_atual = datetime.now().hour
+    saudacao = "Bom dia" if hora_atual < 12 else "Boa tarde"
+    
+    msg = EmailMessage()
+    msg["Subject"] = f"RELATÓRIO COMPLETO - CHECKLIST {st.session_state.dados.get('PLACA_CAMINHAO','')}"
+    msg["From"] = os.getenv("EMAIL_USER")
+    msg["To"] = "lucas.alves@transmaroni.com.br"
+    
+    # Criar resumo dos itens
+    itens_ok = []
+    itens_nao_ok = []
+    
+    for chave, descricao in checklist_itens.items():
+        status = st.session_state.dados.get(chave, "N/A")
+        if status == "OK":
+            itens_ok.append(f"✓ {descricao}")
+        else:
+            itens_nao_ok.append(f"✗ {descricao}")
+    
+    # Corpo do e-mail formatado para facilitar extração com Power Automate
+    corpo_email = f"""
+    {saudacao}, Lucas
+    
+    Segue abaixo o relatório completo do checklist realizado:
+    
+    ========== DADOS DO VEÍCULO ==========
+    PLACA: {st.session_state.dados.get('PLACA_CAMINHAO', 'N/A')}
+    KM_ATUAL: {st.session_state.dados.get('KM_ATUAL', 'N/A')}
+    MOTORISTA: {st.session_state.dados.get('MOTORISTA', 'N/A')}
+    OPERACAO: {st.session_state.dados.get('OPERACAO', 'N/A')}
+    VISTORIADOR: {st.session_state.dados.get('VISTORIADOR', 'N/A')}
+    TIPO_VEICULO: {st.session_state.dados.get('TIPO_VEICULO', 'N/A')}
+    DATA: {st.session_state.dados.get('DATA', 'N/A')}
+    HORA: {st.session_state.dados.get('HORA', 'N/A')}
+    PLACA_CARRETA1: {st.session_state.dados.get('PLACA_CARRETA1', 'N/A')}
+    PLACA_CARRETA2: {st.session_state.dados.get('PLACA_CARRETA2', 'N/A')}
+    BITREM: {st.session_state.dados.get('BITREM', 'N/A')}
+    
+    ========== ITENS VERIFICADOS ==========
+    ITENS_OK: {len(itens_ok)}
+    ITENS_NOK: {len(itens_nao_ok)}
+    
+    --- ITENS EM CONFORMIDADE ---
+    {chr(10).join(itens_ok)}
+    
+    --- ITENS COM PROBLEMAS ---
+    {chr(10).join(itens_nao_ok)}
+    
+    ========== OBSERVAÇÕES ==========
+    {st.session_state.dados.get('OBSERVACOES', 'Nenhuma observação registrada.')}
+    
+    ========== METADADOS ==========
+    TIMESTAMP: {datetime.now().isoformat()}
+    TEMPO_EXECUCAO: {calcular_tempo_execucao()}
+    
+    Atenciosamente,
+    Sistema de Checklist Automático
+    """
+    
+    msg.set_content(corpo_email)
+    
+    # Anexar Ficha Técnica (Word)
+    msg.add_attachment(
+        buffer_word.getvalue(),
+        maintype="application",
+        subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"Ficha_Tecnica_{st.session_state.dados.get('PLACA_CAMINHAO','')}.docx"
+    )
+    
+    # Anexar ZIP das fotos da etapa 2
+    msg.add_attachment(
+        buffer_zip.getvalue(),
+        maintype="application",
+        subtype="zip",
+        filename=f"Fotos_Checklist_{st.session_state.dados.get('PLACA_CAMINHAO','')}.zip"
+    )
+    
+    # Anexar fotos dos itens NÃO OK
+    for item, fotos in fotos_nao_ok.items():
+        if fotos:
+            arquivos = fotos if isinstance(fotos, list) else [fotos]
+            for idx, foto in enumerate(arquivos, start=1):
+                msg.add_attachment(
+                    foto.getvalue(),
+                    maintype="image",
+                    subtype="jpeg",
+                    filename=f"{item}_{idx}.jpg"
+                )
+    
     try:
-        # Carregar a planilha existente
-        workbook = load_workbook("sbd-checklists.xlsx")
-        sheet = workbook.active
-        
-        # Encontrar a próxima linha vazia
-        next_row = sheet.max_row + 1
-        
-        # Gerar ID único (próximo número sequencial)
-        sheet[f"A{next_row}"] = next_row - 1  # ID
-        
-        # Preencher os dados básicos
-        sheet[f"B{next_row}"] = dados_checklist.get("PLACA_CAMINHAO", "").upper()  # Title
-        sheet[f"C{next_row}"] = dados_checklist.get("OPERACAO", "")  # OPERAÇÃO
-        sheet[f"D{next_row}"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # DATA E HORA
-        sheet[f"E{next_row}"] = dados_checklist.get("PLACA_CAMINHAO", "").upper()  # PLACA CAMINHÃO 1
-        sheet[f"F{next_row}"] = dados_checklist.get("PLACA_CARRETA2", "").upper()  # PLACA CAMINHÃO 2
-        sheet[f"G{next_row}"] = tempo_execucao  # TIME EXECUÇÃO
-        sheet[f"H{next_row}"] = dados_checklist.get("MOTORISTA", "").upper()  # MOTORISTA
-        sheet[f"I{next_row}"] = dados_checklist.get("VISTORIADOR", "").upper()  # VISTORIADOR
-        
-        # KM ATUAL (converter para número)
-        km_str = str(dados_checklist.get("KM_ATUAL", "0")).replace(".", "").replace(",", "")
-        try:
-            sheet[f"J{next_row}"] = int(km_str)
-        except ValueError:
-            sheet[f"J{next_row}"] = 0
-        
-        sheet[f"K{next_row}"] = dados_checklist.get("TIPO_VEICULO", "").upper()  # TIPO DE VEÍCULO
-        
-        # TIPO DE CARRETA
-        if dados_checklist.get("CARRETA_2") == "X":
-            sheet[f"M{next_row}"] = "2 EIXOS"
-        elif dados_checklist.get("CARRETA_3") == "X":
-            sheet[f"M{next_row}"] = "3 EIXOS"
-        
-        # Preencher os itens do checklist
-        for chave, coluna_excel in CHECKLIST_TO_EXCEL.items():
-            valor = dados_checklist.get(chave, "")
-            if coluna_excel in EXCEL_COLUMNS:
-                coluna = EXCEL_COLUMNS[coluna_excel]
-                sheet[f"{coluna}{next_row}"] = valor.upper() if valor else ""
-        
-        # Salvar a planilha
-        workbook.save("sbd-checklists.xlsx")
+        with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
+            smtp.starttls()
+            smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
+            smtp.send_message(msg)
         return True
-        
     except Exception as e:
-        st.error(f"Erro ao salvar na planilha Excel: {e}")
+        st.error(f"Erro ao enviar e-mail para Lucas Alves: {e}")
         return False
+
+def calcular_tempo_execucao():
+    """Calcula o tempo de execução do checklist"""
+    if "start_time" in st.session_state:
+        segundos = int(time.time() - st.session_state.start_time)
+        minutos = segundos // 60
+        segundos_restantes = segundos % 60
+        return f"{minutos:02d}:{segundos_restantes:02d}"
+    return "N/A"
 
 # -------------------
 # ETAPA 1
@@ -402,7 +380,7 @@ if st.session_state.etapa == 1:
             "CAVALO_TOCO": "",
             "CAVALO_TRUCADO": "",
             "CAVALO_TRACADO": "",
-        })
+        })  
         st.session_state.dados['PLACA_CARRETA1'] = ""
         st.session_state.dados['PLACA_CARRETA2'] = ""
         st.session_state.dados['BITREM'] = "NÃO"
@@ -445,6 +423,7 @@ elif st.session_state.etapa == 2:
             st.session_state.etapa = 3
         else:
             st.warning("Envie no mínimo 4 imagens.")
+
 # -------------------
 # ETAPA 3
 # -------------------
@@ -474,13 +453,11 @@ elif st.session_state.etapa == 3:
         "CÂMERA_DEFLETORLD": "Câmera Defletor Lado Direito",
         "CÂMERA_DEFLETORLE": "Câmera Defletor Lado Esquerdo",
         "FUNCIONAMENTO_TK_OK": "Funcionamento TK",
-
-        # ===== Itens IMAGEM DIGITAL solicitados (chaves EXATAS do DOCX) =====
         "CÂMERACOLUNA_LD": "Imagem digital câmera coluna LD",
         "CÂMERACOLUNA_LE": "Imagem digital câmera coluna LE",
         "CÂMERADEFLETOR_LD": "Imagem digital câmera defletor LD",
         "CÂMERADEFLETOR_LE": "Imagem digital câmera defletor LE",
-        "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "Parafuso suspensão Vanderleia Facchini",  # <-- Adicionado
+        "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "Parafuso suspensão Vanderleia Facchini",
     }
 
     for chave, descricao in checklist_itens.items():
@@ -518,8 +495,6 @@ elif st.session_state.etapa == 3:
         with st.spinner("Finalizando checklist..."):
             try:
                 # ===== Gera Word a partir do template =====
-                # Certifique-se que o arquivo do template corresponde ao seu DOCX:
-                # Ex.: "Ficha Técnica.docx" e contém os placeholders {{CHAVE}}
                 doc = Document("Ficha Técnica.docx")
                 for p in doc.paragraphs:
                     for k, v in st.session_state.dados.items():
@@ -539,25 +514,13 @@ elif st.session_state.etapa == 3:
                 doc.save(buffer_word)
                 buffer_word.seek(0)
 
-                # (Mantido) Gera PDF simples com os dados - opcional
-                buffer_pdf = BytesIO()
-                c = canvas.Canvas(buffer_pdf, pagesize=A4)
-                text = c.beginText(40, 800)
-                text.setFont("Helvetica", 12)
-                for chave, valor in st.session_state.dados.items():
-                    text.textLine(f"{chave}: {valor}")
-                c.drawText(text)
-                c.showPage()
-                c.save()
-                buffer_pdf.seek(0)
-
                 # ZIP das fotos etapa 2
                 buffer_zip = gerar_zip_imagens(st.session_state.imagens)
 
                 # Itens NÃO OK (para e-mails)
                 itens_nao_ok = [k for k, v in st.session_state.dados.items() if v == "NÃO OK"]
 
-                # Envia e-mails com Word, ZIP e fotos dos itens
+                # Envia e-mails para os responsáveis pelos itens
                 enviar_emails_personalizados(
                     itens_nao_ok,
                     st.session_state.fotos_nao_ok,
@@ -565,24 +528,14 @@ elif st.session_state.etapa == 3:
                     buffer_word,
                     buffer_zip
                 )
-
-                # Calcula o tempo de execução do checklist
-                tempo_execucao = ""
-                if "start_time" in st.session_state:
-                    segundos = int(time.time() - st.session_state.start_time)
-                    minutos = segundos // 60
-                    segundos_restantes = segundos % 60
-                    tempo_execucao = f"{minutos:02d}:{segundos_restantes:02d}"
-
-                # ===== Salva na planilha Excel =====
-                try:
-                    sucesso = salvar_na_planilha_excel(st.session_state.dados, tempo_execucao)
-                    if sucesso:
-                        st.success("Checklist concluído, e-mails enviados")
-                    else:
-                        st.warning("Checklist concluído e e-mails enviados, mas NÃO foi salvo na planilha Excel.")
-                except Exception as e:
-                    st.warning(f"Checklist concluído e e-mails enviados, mas NÃO foi salvo na planilha Excel: {e}")
+                
+                # ENVIO DO E-MAIL PARA O LUCAS - NOVA FUNCIONALIDADE
+                enviou_lucas = enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, st.session_state.fotos_nao_ok)
+                
+                if enviou_lucas:
+                    st.success("Checklist concluído e e-mail enviado para Lucas Alves! Reiniciando...")
+                else:
+                    st.warning("Checklist concluído, mas houve um problema ao enviar o e-mail para Lucas Alves.")
 
                 time.sleep(2)
                 st.session_state.clear()
