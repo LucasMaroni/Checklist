@@ -342,7 +342,7 @@ if st.session_state.etapa == 1:
     ]
     st.session_state.dados['OPERACAO'] = st.selectbox("Operação", operacoes)
 
-    st.session_state.dados['VISTORIADOR'] = "CLEBER QUELSON BEZERRA DE MENEZES"
+    st.session_state.dados['VISTORIADOR'] = "ANTÔNIO RINALDO RAMOS"
 
     tipo_veiculo = st.radio("Tipo de veículo", ["CAVALO", "RÍGIDO"])
     st.session_state.dados['TIPO_VEICULO'] = tipo_veiculo
