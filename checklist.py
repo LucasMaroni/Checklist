@@ -7,6 +7,8 @@ from reportlab.lib.pagesizes import A4
 from io import BytesIO
 import smtplib
 from email.message import EmailMessage
+from email.header import Header
+from email.utils import formataddr
 from dotenv import load_dotenv
 import zipfile
 import time
@@ -115,10 +117,232 @@ EMAILS_OPERACOES = {
     "BAÚ": ["baugrupo@transmaroni.com.br"]
 }
 
-def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, buffer_word, buffer_zip):
-    """Envia os e-mails para os responsáveis de cada item com Word, ZIP e fotos dos itens"""
+def formatar_remetente():
+    """Formata o remetente de forma profissional"""
+    return formataddr((
+        str(Header('Sistema de Checklist - TransMaroni', 'utf-8')),
+        os.getenv("EMAIL_USER")
+    ))
+
+def criar_corpo_email_html(dados, checklist_itens, itens_nao_ok):
+    """Cria corpo do e-mail em HTML para melhor aceitação"""
     hora_atual = datetime.now().hour
     saudacao = "Bom dia" if hora_atual < 12 else "Boa tarde"
+    
+    # Criar listas de itens OK e NÃO OK
+    itens_ok_lista = []
+    itens_nao_ok_lista = []
+    
+    for chave, descricao in checklist_itens.items():
+        status = dados.get(chave, "N/A")
+        if status == "OK":
+            itens_ok_lista.append(f"<li style='color: green;'>✓ {descricao}</li>")
+        else:
+            itens_nao_ok_lista.append(f"<li style='color: red;'>✗ {descricao}</li>")
+    
+    itens_ok_html = "".join(itens_ok_lista) if itens_ok_lista else "<li>Nenhum item com problema</li>"
+    itens_nao_ok_html = "".join(itens_nao_ok_lista) if itens_nao_ok_lista else "<li>Todos os itens estão OK</li>"
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{
+                font-family: 'Arial', sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f9f9f9;
+            }}
+            .header {{
+                background-color: #0047AB;
+                color: white;
+                padding: 20px;
+                border-radius: 10px 10px 0 0;
+                text-align: center;
+            }}
+            .content {{
+                background-color: white;
+                padding: 30px;
+                border-radius: 0 0 10px 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .section {{
+                margin-bottom: 25px;
+                padding-bottom: 15px;
+                border-bottom: 1px solid #eee;
+            }}
+            .section-title {{
+                color: #0047AB;
+                font-size: 18px;
+                font-weight: bold;
+                margin-bottom: 10px;
+                padding-bottom: 5px;
+                border-bottom: 2px solid #0047AB;
+            }}
+            .info-row {{
+                display: flex;
+                margin-bottom: 8px;
+            }}
+            .info-label {{
+                font-weight: bold;
+                width: 200px;
+                color: #555;
+            }}
+            .info-value {{
+                flex: 1;
+            }}
+            .status-ok {{
+                color: #28a745;
+                font-weight: bold;
+            }}
+            .status-nok {{
+                color: #dc3545;
+                font-weight: bold;
+            }}
+            .footer {{
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #ddd;
+                font-size: 12px;
+                color: #666;
+                text-align: center;
+            }}
+            .disclaimer {{
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-left: 4px solid #0047AB;
+                margin: 20px 0;
+                font-size: 13px;
+                color: #6c757d;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1 style="margin: 0; font-size: 24px;">🚚 CHECKLIST DE MANUTENÇÃO</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">Sistema Oficial - TransMaroni Logística</p>
+        </div>
+        
+        <div class="content">
+            <div class="disclaimer">
+                <strong>⚠️ E-MAIL OFICIAL DO SISTEMA:</strong> Esta é uma mensagem automática do sistema oficial de checklist da TransMaroni. 
+                Você está recebendo este e-mail porque é responsável por itens de manutenção verificados.
+            </div>
+            
+            <div class="section">
+                <div class="section-title">📋 DADOS DA VISTORIA</div>
+                <div class="info-row">
+                    <div class="info-label">Motorista:</div>
+                    <div class="info-value">{dados.get('MOTORISTA', 'N/A')}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Vistoriador:</div>
+                    <div class="info-value">{dados.get('VISTORIADOR', 'N/A')}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Data/Hora:</div>
+                    <div class="info-value">{dados.get('DATA', 'N/A')} {dados.get('HORA', 'N/A')}</div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">🚛 DADOS DO VEÍCULO</div>
+                <div class="info-row">
+                    <div class="info-label">Placa Caminhão:</div>
+                    <div class="info-value"><strong>{dados.get('PLACA_CAMINHAO', 'N/A')}</strong></div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">KM Atual:</div>
+                    <div class="info-value">{dados.get('KM_ATUAL', 'N/A')}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Operação:</div>
+                    <div class="info-value">{dados.get('OPERACAO', 'N/A')}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Tipo de Veículo:</div>
+                    <div class="info-value">{dados.get('TIPO_VEICULO', 'N/A')}</div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">✅ RESUMO DA VISTORIA</div>
+                <div class="info-row">
+                    <div class="info-label">Total Itens OK:</div>
+                    <div class="info-value status-ok">{len(itens_ok_lista)} itens</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Total Itens NÃO OK:</div>
+                    <div class="info-value status-nok">{len(itens_nao_ok_lista)} itens</div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">🔧 ITENS COM PROBLEMAS</div>
+                <ul>
+                    {itens_nao_ok_html}
+                </ul>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">📝 OBSERVAÇÕES</div>
+                <p>{dados.get('OBSERVACOES', 'Nenhuma observação registrada.')}</p>
+            </div>
+            
+            <div class="footer">
+                <p><strong>Sistema de Checklist Automático</strong><br>
+                TransMaroni Logística<br>
+                Este e-mail foi gerado automaticamente. Por favor, não responda.<br>
+                Para suporte técnico: manutencao.frota@transmaroni.com.br</p>
+                <p style="font-size: 10px; color: #999;">
+                    ID: {datetime.now().strftime('%Y%m%d%H%M%S')} | 
+                    Tempo execução: {calcular_tempo_execucao()}
+                </p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+def enviar_email_seguro(smtp_host, smtp_port, username, password, msg):
+    """Envia e-mail com fallback SSL/TLS para melhor compatibilidade"""
+    try:
+        # Primeira tentativa: SSL (porta 465)
+        with smtplib.SMTP_SSL(smtp_host, 465, timeout=30) as smtp:
+            smtp.login(username, password)
+            smtp.send_message(msg)
+        return True, "SSL"
+    except Exception as e:
+        st.warning(f"SSL falhou ({e}), tentando STARTTLS...")
+        try:
+            # Segunda tentativa: STARTTLS (porta 587)
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
+                smtp.starttls()
+                smtp.login(username, password)
+                smtp.send_message(msg)
+            return True, "STARTTLS"
+        except Exception as e2:
+            return False, f"STARTTLS também falhou: {e2}"
+
+def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, buffer_word, buffer_zip):
+    """Envia os e-mails para os responsáveis de cada item com Word, ZIP e fotos dos itens"""
+    
+    # Configurações SMTP do .env
+    smtp_host = os.getenv("EMAIL_HOST")
+    smtp_port = int(os.getenv("EMAIL_PORT", 587))
+    username = os.getenv("EMAIL_USER")
+    password = os.getenv("EMAIL_PASS")
+    
+    if not all([smtp_host, username, password]):
+        st.error("Configurações de e-mail não encontradas no .env")
+        return
 
     # Adiciona e-mails das operações conforme selecionado
     operacao = st.session_state.dados.get("OPERACAO", "")
@@ -133,28 +357,54 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
         todos_destinatarios = list(set(destinatarios + tuple(emails_operacao)))
 
         msg = EmailMessage()
-        msg["Subject"] = f" CHECKLIST DE MANUTENÇÃO - {st.session_state.dados.get('PLACA_CAMINHAO','')}"
-        msg["From"] = os.getenv("EMAIL_USER")
+        msg["Subject"] = f"[OFICIAL] CHECKLIST DE MANUTENÇÃO - {st.session_state.dados.get('PLACA_CAMINHAO','')}"
+        msg["From"] = formatar_remetente()
         msg["To"] = ", ".join(todos_destinatarios)
+        
+        # Headers importantes para evitar spam
+        msg["X-Mailer"] = "TransMaroni Checklist System v2.0"
+        msg["X-Auto-Response-Suppress"] = "OOF, AutoReply"
+        msg["X-Priority"] = "3"
+        msg["X-MSMail-Priority"] = "Normal"
+        msg["Importance"] = "Normal"
+        msg["List-Unsubscribe"] = f"<mailto:{username}?subject=Unsubscribe>"
 
-        itens_texto = "\n".join([f"- {checklist_itens[i]}" for i in itens_do_grupo])
-        msg.set_content(
-            f"{saudacao},\n\n"
-            f"Motorista: {st.session_state.dados.get('MOTORISTA','')}\n"
-            f"Vistoriador: {st.session_state.dados.get('VISTORIADOR','')}\n"
-            f"Data: {st.session_state.dados.get('DATA','')} {st.session_state.dados.get('HORA','')}\n\n"
-            f"O veículo {st.session_state.dados.get('PLACA_CAMINHAO','')} foi verificado em seu CHECKLIST.\n"
-            f"Os seguintes itens foram vistoriados e precisam ser encaminhados para manutenção:\n\n"
-            f"{itens_texto}\n\n"
-            "Atenciosamente,\nSistema de Checklist"
+        # Corpo do e-mail em HTML e texto plano
+        texto_plano = f"""
+        CHECKLIST DE MANUTENÇÃO - TransMaroni
+        ======================================
+        
+        Motorista: {st.session_state.dados.get('MOTORISTA','')}
+        Vistoriador: {st.session_state.dados.get('VISTORIADOR','')}
+        Data: {st.session_state.dados.get('DATA','')} {st.session_state.dados.get('HORA','')}
+        Placa: {st.session_state.dados.get('PLACA_CAMINHAO','')}
+        
+        O veículo {st.session_state.dados.get('PLACA_CAMINHAO','')} foi verificado em seu CHECKLIST.
+        Itens que precisam de manutenção:
+        
+        {chr(10).join([f'- {checklist_itens[i]}' for i in itens_do_grupo])}
+        
+        ---
+        Este é um e-mail automático do sistema oficial de checklist da TransMaroni.
+        Para suporte: manutencao.frota@transmaroni.com.br
+        """
+        
+        # Corpo HTML
+        html_content = criar_corpo_email_html(
+            st.session_state.dados, 
+            checklist_itens, 
+            itens_do_grupo
         )
+        
+        msg.set_content(texto_plano)
+        msg.add_alternative(html_content, subtype='html')
 
         # Anexar Ficha Técnica (Word)
         msg.add_attachment(
             buffer_word.getvalue(),
             maintype="application",
             subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename="Ficha_Tecnica.docx"
+            filename=f"Ficha_Tecnica_{st.session_state.dados.get('PLACA_CAMINHAO','')}.docx"
         )
 
         # Anexar ZIP das fotos da etapa 2
@@ -162,7 +412,7 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
             buffer_zip.getvalue(),
             maintype="application",
             subtype="zip",
-            filename="Fotos_Checklist.zip"
+            filename=f"Fotos_Checklist_{st.session_state.dados.get('PLACA_CAMINHAO','')}.zip"
         )
 
         # Anexar fotos dos itens NÃO OK (somente os do grupo)
@@ -180,22 +430,37 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
                     )
 
         try:
-            with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
-                smtp.starttls()
-                smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
-                smtp.send_message(msg)
+            sucesso, metodo = enviar_email_seguro(smtp_host, smtp_port, username, password, msg)
+            if sucesso:
+                st.success(f"E-mail enviado para {len(todos_destinatarios)} destinatários ({metodo})")
+            else:
+                st.error(f"Falha ao enviar e-mail para {todos_destinatarios}: {metodo}")
         except Exception as e:
             st.error(f"Erro ao enviar e-mail para {todos_destinatarios}: {e}")
 
 def enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, fotos_nao_ok):
     """Envia e-mail completo para Lucas Alves com todos os dados do checklist em formato estruturado"""
+    
+    smtp_host = os.getenv("EMAIL_HOST")
+    smtp_port = int(os.getenv("EMAIL_PORT", 587))
+    username = os.getenv("EMAIL_USER")
+    password = os.getenv("EMAIL_PASS")
+    
+    if not all([smtp_host, username, password]):
+        st.error("Configurações de e-mail não encontradas para envio ao Lucas")
+        return False
+    
     hora_atual = datetime.now().hour
     saudacao = "Bom dia" if hora_atual < 12 else "Boa tarde"
     
     msg = EmailMessage()
-    msg["Subject"] = f"RELATÓRIO COMPLETO - CHECKLIST {st.session_state.dados.get('PLACA_CAMINHAO','')}"
-    msg["From"] = os.getenv("EMAIL_USER")
+    msg["Subject"] = f"[RELATÓRIO COMPLETO] CHECKLIST {st.session_state.dados.get('PLACA_CAMINHAO','')}"
+    msg["From"] = formatar_remetente()
     msg["To"] = "lucas.alves@transmaroni.com.br"
+    
+    # Headers para melhor aceitação
+    msg["X-Report-Type"] = "Checklist Completo"
+    msg["X-Vehicle-Plate"] = st.session_state.dados.get('PLACA_CAMINHAO', '')
     
     # Criar resumo dos itens
     itens_ok = []
@@ -212,9 +477,9 @@ def enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, fotos_nao_ok):
     corpo_email = f"""
     {saudacao}, Lucas
     
-    Segue abaixo o relatório completo do checklist realizado:
+    ========== RELATÓRIO COMPLETO - SISTEMA DE CHECKLIST ==========
     
-    ========== DADOS DO VEÍCULO ==========
+    [DADOS DO VEÍCULO]
     PLACA: {st.session_state.dados.get('PLACA_CAMINHAO', 'N/A')}
     KM_ATUAL: {st.session_state.dados.get('KM_ATUAL', 'N/A')}
     MOTORISTA: {st.session_state.dados.get('MOTORISTA', 'N/A')}
@@ -227,25 +492,30 @@ def enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, fotos_nao_ok):
     PLACA_CARRETA2: {st.session_state.dados.get('PLACA_CARRETA2', 'N/A')}
     BITREM: {st.session_state.dados.get('BITREM', 'N/A')}
     
-    ========== ITENS VERIFICADOS ==========
+    [ESTATÍSTICAS]
     ITENS_OK: {len(itens_ok)}
     ITENS_NOK: {len(itens_nao_ok)}
+    TOTAL_ITENS: {len(checklist_itens)}
+    PERCENTUAL_OK: {round(len(itens_ok)/len(checklist_itens)*100, 1)}%
     
-    --- ITENS EM CONFORMIDADE ---
-    {chr(10).join(itens_ok)}
+    [ITENS EM CONFORMIDADE]
+    {chr(10).join(itens_ok) if itens_ok else "Nenhum item com problema"}
     
-    --- ITENS COM PROBLEMAS ---
-    {chr(10).join(itens_nao_ok)}
+    [ITENS COM PROBLEMAS]
+    {chr(10).join(itens_nao_ok) if itens_nao_ok else "Todos os itens estão OK"}
     
-    ========== OBSERVAÇÕES ==========
+    [OBSERVAÇÕES]
     {st.session_state.dados.get('OBSERVACOES', 'Nenhuma observação registrada.')}
     
-    ========== METADADOS ==========
+    [METADADOS]
     TIMESTAMP: {datetime.now().isoformat()}
     TEMPO_EXECUCAO: {calcular_tempo_execucao()}
+    SISTEMA_VERSION: 2.0
+    EMAIL_ID: {datetime.now().strftime('%Y%m%d%H%M%S')}
     
-    Atenciosamente,
-    Sistema de Checklist Automático
+    ---
+    Este é um relatório automático do Sistema de Checklist da TransMaroni.
+    Dúvidas: manutencao.frota@transmaroni.com.br
     """
     
     msg.set_content(corpo_email)
@@ -279,11 +549,13 @@ def enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, fotos_nao_ok):
                 )
     
     try:
-        with smtplib.SMTP(os.getenv("EMAIL_HOST"), int(os.getenv("EMAIL_PORT"))) as smtp:
-            smtp.starttls()
-            smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
-            smtp.send_message(msg)
-        return True
+        sucesso, metodo = enviar_email_seguro(smtp_host, smtp_port, username, password, msg)
+        if sucesso:
+            st.success(f"E-mail para Lucas Alves enviado com sucesso ({metodo})")
+            return True
+        else:
+            st.error(f"Falha ao enviar e-mail para Lucas Alves: {metodo}")
+            return False
     except Exception as e:
         st.error(f"Erro ao enviar e-mail para Lucas Alves: {e}")
         return False
@@ -492,6 +764,22 @@ elif st.session_state.etapa == 3:
 
     if col2.button("✅ Finalizar Checklist", disabled=st.session_state.finalizando):
         st.session_state.finalizando = True
+        
+        # Verificar configurações de e-mail
+        if not all([os.getenv("EMAIL_HOST"), os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS")]):
+            st.error("⚠️ Configurações de e-mail não encontradas no .env!")
+            st.info("""
+            Configure as seguintes variáveis no arquivo `.env`:
+            ```
+            EMAIL_HOST=smtp.office365.com
+            EMAIL_PORT=587
+            EMAIL_USER=seu-email@transmaroni.com.br
+            EMAIL_PASS=sua-senha
+            ```
+            """)
+            st.session_state.finalizando = False
+            st.stop()
+        
         with st.spinner("Finalizando checklist..."):
             try:
                 # ===== Gera Word a partir do template =====
@@ -520,28 +808,56 @@ elif st.session_state.etapa == 3:
                 # Itens NÃO OK (para e-mails)
                 itens_nao_ok = [k for k, v in st.session_state.dados.items() if v == "NÃO OK"]
 
+                # Exibir resumo
+                st.info(f"""
+                **Resumo do Checklist:**
+                - Itens OK: {len(checklist_itens) - len(itens_nao_ok)}
+                - Itens NÃO OK: {len(itens_nao_ok)}
+                - Total de fotos: {len(st.session_state.imagens)}
+                - Destinatários: Vários grupos de e-mail
+                """)
+
                 # Envia e-mails para os responsáveis pelos itens
-                enviar_emails_personalizados(
-                    itens_nao_ok,
-                    st.session_state.fotos_nao_ok,
-                    checklist_itens,
-                    buffer_word,
-                    buffer_zip
-                )
+                with st.spinner("Enviando e-mails para os responsáveis..."):
+                    enviar_emails_personalizados(
+                        itens_nao_ok,
+                        st.session_state.fotos_nao_ok,
+                        checklist_itens,
+                        buffer_word,
+                        buffer_zip
+                    )
                 
-                # ENVIO DO E-MAIL PARA O LUCAS - NOVA FUNCIONALIDADE
-                enviou_lucas = enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, st.session_state.fotos_nao_ok)
+                # ENVIO DO E-MAIL PARA O LUCAS
+                with st.spinner("Enviando relatório completo para Lucas Alves..."):
+                    enviou_lucas = enviar_email_lucas(checklist_itens, buffer_word, buffer_zip, st.session_state.fotos_nao_ok)
                 
                 if enviou_lucas:
-                    st.success("Checklist concluído e e-mail enviado para Lucas Alves! Reiniciando...")
+                    st.success("✅ Checklist concluído e e-mail enviado para Lucas Alves!")
+                    
+                    # Mostrar dicas para evitar problemas de spam
+                    with st.expander("💡 Dicas para garantir recebimento dos e-mails"):
+                        st.markdown("""
+                        1. **Peça ao Lucas para:**
+                           - Adicionar `manutencao.frota@transmaroni.com.br` aos contatos
+                           - Criar regra no Outlook para mover seus e-mails para a Caixa de Entrada
+                        
+                        2. **Configurações do domínio (TI da TransMaroni):**
+                           - Configurar SPF, DKIM e DMARC no domínio `transmaroni.com.br`
+                           - Usar subdomínio específico: `sistema@checklist.transmaroni.com.br`
+                        
+                        3. **Verificação:**
+                           - Testar em https://mxtoolbox.com/blacklists.aspx
+                           - Usar https://www.mail-tester.com/ para pontuação de spam
+                        """)
                 else:
-                    st.warning("Checklist concluído, mas houve um problema ao enviar o e-mail para Lucas Alves.")
+                    st.warning("⚠️ Checklist concluído, mas houve problema com o e-mail para Lucas Alves.")
 
-                time.sleep(2)
+                time.sleep(3)
                 st.session_state.clear()
                 st.session_state.etapa = 1
                 st.rerun()
 
             except Exception as e:
                 st.session_state.finalizando = False
-                st.error(f"Erro ao finalizar checklist: {e}")
+                st.error(f"❌ Erro ao finalizar checklist: {e}")
+                st.exception(e)
