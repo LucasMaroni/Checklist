@@ -15,6 +15,7 @@ import re
 from msal import ConfidentialClientApplication
 import requests
 import json
+import urllib.parse
 
 @st.cache_resource
 def carregar_placas_validas():
@@ -119,6 +120,7 @@ def gerar_zip_imagens(imagens):
 def obter_token_sharepoint():
     """Obtém token de acesso para SharePoint usando Client Secret"""
     try:
+        st.info("Obtendo token de acesso para SharePoint...")
         authority = f"https://login.microsoftonline.com/{TENANT_ID}"
         app = ConfidentialClientApplication(
             client_id=CLIENT_ID,
@@ -132,24 +134,106 @@ def obter_token_sharepoint():
         result = app.acquire_token_for_client(scopes=scopes)
         
         if "access_token" in result:
+            st.success("Token obtido com sucesso!")
             return result["access_token"]
         else:
-            st.error(f"Erro ao obter token: {result.get('error_description')}")
+            error_msg = result.get('error_description', str(result))
+            st.error(f"Erro ao obter token: {error_msg}")
+            
+            # Debug: Mostrar mais informações
+            st.error("Verifique:")
+            st.error("1. Se o Client ID está correto")
+            st.error("2. Se o Client Secret está correto no .env")
+            st.error("3. Se o Tenant ID está correto")
+            st.error("4. Se o App Registration tem permissões Sites.ReadWrite.All")
             return None
     except Exception as e:
-        st.error(f"Erro na autenticação: {e}")
+        st.error(f"Erro na autenticação: {str(e)}")
+        return None
+
+def get_site_id(access_token):
+    """Obtém o ID do site SharePoint"""
+    try:
+        # URL codificada para a API Graph
+        site_path = "/sites/ProTech"
+        encoded_site_path = urllib.parse.quote(site_path)
+        
+        graph_url = f"https://graph.microsoft.com/v1.0/sites/grupotransmaroni.sharepoint.com:{encoded_site_path}"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(graph_url, headers=headers)
+        
+        if response.status_code == 200:
+            site_data = response.json()
+            return site_data.get("id")
+        else:
+            st.error(f"Erro ao obter site ID: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Erro ao obter site ID: {str(e)}")
+        return None
+
+def get_list_id(access_token, site_id):
+    """Obtém o ID da lista pelo nome"""
+    try:
+        lists_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(lists_url, headers=headers)
+        
+        if response.status_code == 200:
+            lists_data = response.json()
+            
+            # Procura a lista pelo nome
+            for lista in lists_data.get("value", []):
+                if lista.get("name") == SHAREPOINT_LIST_NAME or lista.get("displayName") == SHAREPOINT_LIST_NAME:
+                    return lista.get("id")
+            
+            st.error(f"Lista '{SHAREPOINT_LIST_NAME}' não encontrada")
+            st.error(f"Listas disponíveis: {[l.get('name') for l in lists_data.get('value', [])]}")
+            return None
+        else:
+            st.error(f"Erro ao obter listas: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Erro ao obter list ID: {str(e)}")
         return None
 
 def enviar_para_sharepoint(dados, fotos_nao_ok):
     """Envia dados do checklist para lista do SharePoint"""
     try:
-        # Obter token de acesso
+        st.info("Conectando ao SharePoint...")
+        
+        # 1. Obter token de acesso
         access_token = obter_token_sharepoint()
         if not access_token:
             return False
         
-        # URL da API Graph para a lista
-        list_url = f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_URL}:/lists/{SHAREPOINT_LIST_NAME}/items"
+        # 2. Obter Site ID
+        st.info("Obtendo Site ID...")
+        site_id = get_site_id(access_token)
+        if not site_id:
+            return False
+        
+        # 3. Obter List ID
+        st.info("Obtendo List ID...")
+        list_id = get_list_id(access_token, site_id)
+        if not list_id:
+            return False
+        
+        st.success(f"Site ID: {site_id[:50]}...")
+        st.success(f"List ID: {list_id}")
+        
+        # 4. Preparar dados para envio
+        st.info("Preparando dados para envio...")
         
         # Mapeamento dos campos do checklist para os field_N do SharePoint
         item_data = {
@@ -199,65 +283,84 @@ def enviar_para_sharepoint(dados, fotos_nao_ok):
             }
         }
         
-        # Headers para a requisição
+        # 5. Criar item na lista
+        st.info("Enviando dados para a lista...")
+        create_item_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
+        
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
         
-        # Criar item na lista
-        response = requests.post(list_url, headers=headers, json=item_data)
+        response = requests.post(create_item_url, headers=headers, json=item_data)
         
         if response.status_code == 201:
             item_id = response.json().get("id")
             st.success(f"Dados enviados para SharePoint! ID do item: {item_id}")
             
-            # Enviar fotos como anexos
+            # 6. Enviar fotos como anexos
             if fotos_nao_ok:
-                enviar_fotos_como_anexos(item_id, fotos_nao_ok, access_token)
+                st.info("Enviando fotos como anexos...")
+                enviar_fotos_como_anexos(site_id, list_id, item_id, fotos_nao_ok, access_token)
             
             return True
         else:
-            st.error(f"Erro ao enviar para SharePoint: {response.status_code} - {response.text}")
+            st.error(f"Erro ao criar item na lista: {response.status_code}")
+            st.error(f"Resposta: {response.text}")
+            st.error(f"URL usada: {create_item_url}")
             return False
             
     except Exception as e:
-        st.error(f"Erro ao enviar para SharePoint: {e}")
+        st.error(f"Erro ao enviar para SharePoint: {str(e)}")
+        import traceback
+        st.error(f"Traceback: {traceback.format_exc()}")
         return False
 
-def enviar_fotos_como_anexos(item_id, fotos_nao_ok, access_token):
+def enviar_fotos_como_anexos(site_id, list_id, item_id, fotos_nao_ok, access_token):
     """Envia fotos dos itens NÃO OK como anexos do item do SharePoint"""
     try:
+        anexos_enviados = 0
+        
         for item_nome, fotos in fotos_nao_ok.items():
             if fotos:
                 arquivos = fotos if isinstance(fotos, list) else [fotos]
                 for idx, foto in enumerate(arquivos, start=1):
                     # URL para upload do anexo
-                    upload_url = f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE_URL}:/lists/{SHAREPOINT_LIST_NAME}/items/{item_id}/attachments"
+                    upload_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items/{item_id}/attachments"
                     
                     # Criar o conteúdo do arquivo
                     file_content = foto.getvalue()
                     file_name = f"{item_nome}_{idx}.jpg"
                     
+                    # Criar corpo da requisição para anexo
+                    attachment_data = {
+                        "name": file_name,
+                        "contentBytes": file_content.hex()  # Converter para hex para Graph API
+                    }
+                    
                     # Headers para upload
                     headers = {
                         "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/octet-stream"
+                        "Content-Type": "application/json"
                     }
                     
                     # Fazer upload do arquivo
                     response = requests.post(
                         upload_url,
                         headers=headers,
-                        data=file_content,
-                        params={"fileName": file_name}
+                        json=attachment_data
                     )
                     
-                    if response.status_code != 201:
-                        st.warning(f"Erro ao enviar anexo {file_name}: {response.status_code}")
+                    if response.status_code == 201:
+                        anexos_enviados += 1
+                    else:
+                        st.warning(f"Erro ao enviar anexo {file_name}: {response.status_code} - {response.text}")
+        
+        if anexos_enviados > 0:
+            st.success(f"{anexos_enviados} fotos enviadas como anexos")
                         
     except Exception as e:
-        st.warning(f"Erro ao enviar fotos como anexos: {e}")
+        st.warning(f"Erro ao enviar fotos como anexos: {str(e)}")
 
 # Mapeamento de e-mails das operações
 EMAILS_OPERACOES = {
