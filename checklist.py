@@ -122,15 +122,76 @@ def mostrar_tela_codigo():
     user_code = st.session_state.user_code
     verification_uri = st.session_state.verification_uri
     
+    # Estado para feedback de cópia
+    if "codigo_copiado" not in st.session_state:
+        st.session_state.codigo_copiado = False
+    
     # Layout em colunas para celular
     col1, col2 = st.columns([1, 1])
     
     with col1:
         st.markdown("### 📋 **Código:**")
-        st.markdown(f'<div style="font-size: 24px; font-weight: bold; background-color: #f0f0f0; padding: 15px; border-radius: 10px; text-align: center;">{user_code}</div>', unsafe_allow_html=True)
         
-        # Botão para tentar copiar
-        st.button("📋 Copiar Código", use_container_width=True)
+        # Área de código com seleção facilitada
+        st.markdown(f"""
+        <div onclick="this.select()" style="
+            font-size: 24px; 
+            font-weight: bold; 
+            background-color: #f8f9fa; 
+            padding: 20px; 
+            border-radius: 10px; 
+            text-align: center;
+            border: 2px solid #dee2e6;
+            cursor: text;
+            user-select: all;
+            -webkit-user-select: all;
+            -moz-user-select: all;
+            -ms-user-select: all;">
+            {user_code}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Botão com feedback visual
+        if st.button(
+            "✅ Copiado!" if st.session_state.codigo_copiado else "📋 Copiar Código",
+            use_container_width=True,
+            type="secondary" if not st.session_state.codigo_copiado else "primary",
+            key="copy_button"
+        ):
+            # Tentar copiar via JavaScript
+            js_code = f"""
+            <script>
+            // Método moderno
+            if (navigator.clipboard) {{
+                navigator.clipboard.writeText("{user_code}")
+                    .then(() => console.log("Código copiado"))
+                    .catch(err => {{
+                        // Fallback para métodos antigos
+                        const textArea = document.createElement("textarea");
+                        textArea.value = "{user_code}";
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(textArea);
+                    }});
+            }} else {{
+                // Fallback para navegadores antigos
+                const textArea = document.createElement("textarea");
+                textArea.value = "{user_code}";
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand("copy");
+                document.body.removeChild(textArea);
+            }}
+            </script>
+            """
+            st.components.v1.html(js_code, height=0)
+            st.session_state.codigo_copiado = True
+            st.rerun()
+        
+        # Dica para copiar manualmente
+        if not st.session_state.codigo_copiado:
+            st.caption("💡 **Toque longo no código acima** → Selecione 'Copiar'")
     
     with col2:
         st.markdown("### 🔗 **Link:**")
@@ -138,49 +199,84 @@ def mostrar_tela_codigo():
         st.markdown(f"""
         <a href="{verification_uri}" target="_blank" style="
             display: block;
-            padding: 15px;
-            background-color: #0078D4;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             text-align: center;
             border-radius: 10px;
             text-decoration: none;
-            font-size: 16px;
+            font-size: 18px;
             font-weight: bold;
-            margin: 10px 0;">
+            margin: 10px 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        " onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
             🌐 ABRIR PÁGINA DE LOGIN
         </a>
         """, unsafe_allow_html=True)
+        
+        st.caption("🔗 Toque acima para abrir em nova aba")
     
     # Instruções passo a passo
     st.markdown("---")
-    st.markdown("### 📝 **Como fazer:**")
     
-    steps = [
-        "1. **Toque no botão azul acima** para abrir a página de login",
-        "2. **Toque longo no código** e selecione 'Copiar'",
-        "3. **Volte para a página aberta** e cole o código",
-        "4. **Selecione sua conta** @transmaroni.com.br",
-        "5. **Conceda as permissões** solicitadas",
-        "6. **Volte para este app** e clique no botão abaixo"
-    ]
+    # Container de instruções
+    with st.container():
+        st.markdown("### 📝 **Passo a passo:**")
+        
+        col_inst1, col_inst2 = st.columns(2)
+        
+        with col_inst1:
+            st.markdown("""
+            **1.** Toque no **botão azul** acima  
+            **2.** Página abrirá em nova aba  
+            **3.** **Toque no botão 'Copiar Código'**  
+            **4.** Volte para a página aberta
+            """)
+        
+        with col_inst2:
+            st.markdown("""
+            **5.** Cole o código copiado  
+            **6.** Selecione sua conta da empresa  
+            **7.** Aceite as permissões  
+            **8.** Volte aqui e clique abaixo ↓
+            """)
     
-    for step in steps:
-        st.markdown(step)
+    st.markdown("---")
     
-    # Botão principal
-    if st.button("✅ JÁ FIZ LOGIN - CONTINUAR", type="primary", use_container_width=True):
-        with st.spinner("Validando..."):
-            token_info = obter_token(st.session_state.login_flow)
-            if token_info:
-                st.session_state.access_token_info = token_info
-                st.session_state.autenticado = True
-                # Limpar dados temporários
-                for key in ["login_flow", "user_code", "verification_uri"]:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
-            else:
-                st.error("❌ Falha na autenticação")
+    # Botão principal com verificação
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+    
+    with col_btn2:
+        if st.button(
+            "✅ JÁ FIZ LOGIN - CONTINUAR", 
+            type="primary", 
+            use_container_width=True,
+            disabled=not st.session_state.codigo_copiado,  # Desabilita se não copiou
+            help="Copie o código primeiro para habilitar este botão"
+        ):
+            with st.spinner("Validando autenticação..."):
+                token_info = obter_token(st.session_state.login_flow)
+                if token_info:
+                    st.session_state.access_token_info = token_info
+                    st.session_state.autenticado = True
+                    # Limpar dados temporários
+                    for key in ["login_flow", "user_code", "verification_uri", "codigo_copiado"]:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
+                else:
+                    st.error("❌ Falha na autenticação. Verifique se:")
+                    st.error("• Inseriu o código corretamente")
+                    st.error("• Selecionou a conta correta")
+                    st.error("• Concedeu todas as permissões")
+    
+    # Reset se necessário
+    if st.button("🔄 Reiniciar processo", use_container_width=True):
+        for key in ["login_flow", "user_code", "verification_uri", "codigo_copiado"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
 
 # =========================================================
 # VERIFICAÇÃO DE AUTENTICAÇÃO
