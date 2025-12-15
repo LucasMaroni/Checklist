@@ -117,63 +117,70 @@ def mostrar_tela_login():
     st.stop()
 
 def mostrar_tela_codigo():
-    """Mostra tela para inserir código de autenticação"""
     st.title("📱 Autenticação Microsoft")
     
     user_code = st.session_state.user_code
     verification_uri = st.session_state.verification_uri
     
-    # Mostrar código
-    st.info("**Siga estes passos:**")
-    st.markdown("""
-    1. **Clique no botão abaixo** para abrir a página de login
-    2. **Use este código:** (já copiado automaticamente)
-    3. **Selecione sua conta** corporativa
-    4. **Volte aqui e clique em 'Já autentiquei'**
-    """)
+    # Layout em colunas para celular
+    col1, col2 = st.columns([1, 1])
     
-    # Código em destaque
-    st.code(user_code, language="text")
+    with col1:
+        st.markdown("### 📋 **Código:**")
+        st.markdown(f'<div style="font-size: 24px; font-weight: bold; background-color: #f0f0f0; padding: 15px; border-radius: 10px; text-align: center;">{user_code}</div>', unsafe_allow_html=True)
+        
+        # Botão para tentar copiar
+        st.button("📋 Copiar Código", use_container_width=True)
     
-    # Copiar código automaticamente
-    try:
-        pyperclip.copy(user_code)
-        st.success("✅ Código copiado para área de transferência!")
-    except:
-        pass
+    with col2:
+        st.markdown("### 🔗 **Link:**")
+        # Link grande e fácil de tocar
+        st.markdown(f"""
+        <a href="{verification_uri}" target="_blank" style="
+            display: block;
+            padding: 15px;
+            background-color: #0078D4;
+            color: white;
+            text-align: center;
+            border-radius: 10px;
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 10px 0;">
+            🌐 ABRIR PÁGINA DE LOGIN
+        </a>
+        """, unsafe_allow_html=True)
     
-    # Botão para abrir automaticamente
-    if st.button("🌐 Abrir página de login automaticamente", use_container_width=True, type="primary"):
-        webbrowser.open(verification_uri)
-        st.success("Página aberta! Cole o código copiado.")
-    
+    # Instruções passo a passo
     st.markdown("---")
+    st.markdown("### 📝 **Como fazer:**")
     
-    # Botão para confirmar autenticação
-    if st.button("✅ Já me autentiquei", use_container_width=True, type="primary"):
-        with st.spinner("Validando autenticação..."):
+    steps = [
+        "1. **Toque no botão azul acima** para abrir a página de login",
+        "2. **Toque longo no código** e selecione 'Copiar'",
+        "3. **Volte para a página aberta** e cole o código",
+        "4. **Selecione sua conta** @transmaroni.com.br",
+        "5. **Conceda as permissões** solicitadas",
+        "6. **Volte para este app** e clique no botão abaixo"
+    ]
+    
+    for step in steps:
+        st.markdown(step)
+    
+    # Botão principal
+    if st.button("✅ JÁ FIZ LOGIN - CONTINUAR", type="primary", use_container_width=True):
+        with st.spinner("Validando..."):
             token_info = obter_token(st.session_state.login_flow)
-            
             if token_info:
                 st.session_state.access_token_info = token_info
                 st.session_state.autenticado = True
-                
                 # Limpar dados temporários
-                if "login_flow" in st.session_state:
-                    del st.session_state.login_flow
-                if "user_code" in st.session_state:
-                    del st.session_state.user_code
-                if "verification_uri" in st.session_state:
-                    del st.session_state.verification_uri
-                
+                for key in ["login_flow", "user_code", "verification_uri"]:
+                    if key in st.session_state:
+                        del st.session_state[key]
                 st.rerun()
             else:
-                st.error("Autenticação falhou. Tente novamente.")
-    
-    if st.button("🔄 Tentar novamente"):
-        if "login_flow" in st.session_state:
-            del st.session_state.login_flow
-        st.rerun()
+                st.error("❌ Falha na autenticação")
 
 # =========================================================
 # VERIFICAÇÃO DE AUTENTICAÇÃO
