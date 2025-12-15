@@ -1,6 +1,8 @@
 import streamlit as st
 import os
-from datetime import datetime
+import webbrowser
+import pyperclip
+from datetime import datetime, timedelta
 from docx import Document
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -12,10 +14,203 @@ import zipfile
 import time
 import pandas as pd
 import re
-from msal import ConfidentialClientApplication
 import requests
 import json
-import urllib.parse
+import msal
+
+# ============ CARREGA VARIÁVEIS DE AMBIENTE PRIMEIRO ============
+load_dotenv()
+
+# Configuração da página para celular
+st.set_page_config(
+    page_title="Checklist de Caminhão",
+    layout="centered",
+    initial_sidebar_state="collapsed"  # Esconde sidebar para celular
+)
+
+# =========================================================
+# CONFIGURAÇÕES
+# =========================================================
+SITE_ID = os.getenv("SHAREPOINT_SITE_ID", "grupotransmaroni.sharepoint.com,05ba43d5-bdf9-4038-8e14-4d1eaf3e1a6f,df8ac049-ced8-4fd7-aacd-e5e30e40892b")
+LIST_ID = os.getenv("SHAREPOINT_LIST_ID", "34c630b2-37f8-45ed-8b74-5803b619e8c6")
+
+# Configurações Azure AD
+CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
+TENANT_ID = os.getenv("AZURE_TENANT_ID")
+SCOPES = ["https://graph.microsoft.com/.default"]
+
+# =========================================================
+# FUNÇÕES DE AUTENTICAÇÃO PERSISTENTE (SIMPLIFICADA)
+# =========================================================
+
+def iniciar_autenticacao():
+    """Inicia o fluxo de autenticação com Device Code"""
+    try:
+        app = msal.PublicClientApplication(
+            client_id=CLIENT_ID,
+            authority=f"https://login.microsoftonline.com/{TENANT_ID}"
+        )
+        
+        # Iniciar fluxo de device code
+        flow = app.initiate_device_flow(scopes=SCOPES)
+        
+        if "user_code" not in flow:
+            raise ValueError("Falha ao criar fluxo de device code")
+        
+        return flow
+    except Exception as e:
+        st.error(f"Erro na autenticação: {str(e)}")
+        return None
+
+def obter_token(flow):
+    """Obtém token do fluxo de autenticação"""
+    try:
+        app = msal.PublicClientApplication(
+            client_id=CLIENT_ID,
+            authority=f"https://login.microsoftonline.com/{TENANT_ID}"
+        )
+        
+        result = app.acquire_token_by_device_flow(flow)
+        
+        if "access_token" in result:
+            # Calcular tempo de expiração (geralmente 1 hora)
+            expires_in = result.get("expires_in", 3600)
+            expiry_time = datetime.now() + timedelta(seconds=expires_in)
+            
+            return {
+                "access_token": result["access_token"],
+                "expires_at": expiry_time.timestamp()
+            }
+        else:
+            return None
+    except Exception as e:
+        return None
+
+def token_valido(token_info):
+    """Verifica se o token ainda é válido"""
+    if not token_info:
+        return False
+    
+    expires_at = token_info.get("expires_at", 0)
+    # Considerar token válido se expira em mais de 5 minutos
+    return time.time() < (expires_at - 300)
+
+# =========================================================
+# INTERFACE DE LOGIN SIMPLIFICADA
+# =========================================================
+
+def mostrar_tela_login():
+    """Mostra tela de login simplificada"""
+    st.title("📝 CheckList Manutenção")
+    st.markdown("---")
+    
+    if st.button("🔐 Entrar com Microsoft", use_container_width=True, type="primary"):
+        with st.spinner("Preparando autenticação..."):
+            flow = iniciar_autenticacao()
+            
+            if flow:
+                st.session_state.login_flow = flow
+                st.session_state.user_code = flow["user_code"]
+                st.session_state.verification_uri = flow["verification_uri"]
+                st.rerun()
+    
+    st.stop()
+
+def mostrar_tela_codigo():
+    """Mostra tela para inserir código de autenticação"""
+    st.title("📱 Autenticação Microsoft")
+    
+    user_code = st.session_state.user_code
+    verification_uri = st.session_state.verification_uri
+    
+    # Mostrar código
+    st.info("**Siga estes passos:**")
+    st.markdown("""
+    1. **Clique no botão abaixo** para abrir a página de login
+    2. **Use este código:** (já copiado automaticamente)
+    3. **Selecione sua conta** corporativa
+    4. **Volte aqui e clique em 'Já autentiquei'**
+    """)
+    
+    # Código em destaque
+    st.code(user_code, language="text")
+    
+    # Copiar código automaticamente
+    try:
+        pyperclip.copy(user_code)
+        st.success("✅ Código copiado para área de transferência!")
+    except:
+        pass
+    
+    # Botão para abrir automaticamente
+    if st.button("🌐 Abrir página de login automaticamente", use_container_width=True, type="primary"):
+        webbrowser.open(verification_uri)
+        st.success("Página aberta! Cole o código copiado.")
+    
+    st.markdown("---")
+    
+    # Botão para confirmar autenticação
+    if st.button("✅ Já me autentiquei", use_container_width=True, type="primary"):
+        with st.spinner("Validando autenticação..."):
+            token_info = obter_token(st.session_state.login_flow)
+            
+            if token_info:
+                st.session_state.access_token_info = token_info
+                st.session_state.autenticado = True
+                
+                # Limpar dados temporários
+                if "login_flow" in st.session_state:
+                    del st.session_state.login_flow
+                if "user_code" in st.session_state:
+                    del st.session_state.user_code
+                if "verification_uri" in st.session_state:
+                    del st.session_state.verification_uri
+                
+                st.rerun()
+            else:
+                st.error("Autenticação falhou. Tente novamente.")
+    
+    if st.button("🔄 Tentar novamente"):
+        if "login_flow" in st.session_state:
+            del st.session_state.login_flow
+        st.rerun()
+
+# =========================================================
+# VERIFICAÇÃO DE AUTENTICAÇÃO
+# =========================================================
+
+# Estados da sessão
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if "access_token_info" not in st.session_state:
+    st.session_state.access_token_info = None
+
+# Verificar autenticação
+if not st.session_state.autenticado:
+    # Não autenticado - mostrar tela de login
+    if "login_flow" not in st.session_state:
+        mostrar_tela_login()
+    else:
+        mostrar_tela_codigo()
+else:
+    # Verificar se token ainda é válido
+    token_info = st.session_state.access_token_info
+    
+    if not token_valido(token_info):
+        st.warning("⚠️ Sessão expirada. Faça login novamente.")
+        st.session_state.autenticado = False
+        st.rerun()
+
+# =========================================================
+# APÓS AUTENTICAÇÃO - APLICAÇÃO PRINCIPAL (INTERFACE ORIGINAL)
+# =========================================================
+
+st.title("📝 CheckList Manutenção")
+
+# =========================================================
+# FUNÇÕES DO CHECKLIST (MANTIDAS DA VERSÃO ANTERIOR)
+# =========================================================
 
 @st.cache_resource
 def carregar_placas_validas():
@@ -26,7 +221,7 @@ def carregar_placas_validas():
         st.warning(f"Não foi possível carregar a lista de placas: {e}")
         return set()
 
-# Carregar lista de placas válidas ANTES de qualquer uso
+# Carregar lista de placas válidas
 PLACAS_VALIDAS = set()
 try:
     df_placas = pd.read_excel("placas.xlsx")
@@ -34,21 +229,7 @@ try:
 except Exception as e:
     st.warning(f"Não foi possível carregar a lista de placas: {e}")
 
-# Carregar variáveis de ambiente
-load_dotenv()
-
-# Configurações do SharePoint (adicione essas variáveis no seu .env)
-SHAREPOINT_SITE_URL = "https://grupotransmaroni.sharepoint.com/sites/ProTech"
-SHAREPOINT_LIST_NAME = "SGBD - Checklists de Manutenção 📝"
-TENANT_ID = "8babaf2b-248f-4651-98d6-1e5312fbe00a"
-CLIENT_ID = "82db6f97-74e8-458a-9273-c8aa3e1c7e7a"
-CLIENT_SECRET = os.getenv("CLIENT_SECRET", "vlM8Q~k~IvWd1rYMePChe4T6S0gaInWEakWSsazM")
-
-# Configuração da página
-st.set_page_config(page_title="Checklist de Caminhão", layout="centered")
-st.title("📝 CheckList Manutenção")
-
-# Estados
+# Estados do checklist
 if "etapa" not in st.session_state:
     st.session_state.etapa = 1
 if "dados" not in st.session_state:
@@ -59,7 +240,7 @@ if "fotos_nao_ok" not in st.session_state:
     st.session_state.fotos_nao_ok = {}
 
 # -------------------
-# RESPONSÁVEIS POR ITEM (grupos)
+# RESPONSÁVEIS POR ITEM (grupos) - MANTIDO
 # -------------------
 RESPONSAVEIS = {
     (
@@ -77,7 +258,7 @@ RESPONSAVEIS = {
         "VAZAMENTO_AR_OK", "PNEUS_OK", "PARABRISA_OK", "ILUMINACAO_OK", "FAIXAS_REFLETIVAS_OK",
         "FALHAS_PAINEL_OK"
     ],
-    ("henrique.araujo@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "manutencao.frota@transmaroni.com.br",): [
+    ("lucas.alves@transmaroni.com.br",): [
         "FUNCIONAMENTO_TK_OK"
     ],
     ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
@@ -86,11 +267,9 @@ RESPONSAVEIS = {
     ("wesley.assumpcao@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", "bruna.silva@transmaroni.com.br", "alex.franca@transmaroni.com.br", ): [
         "FUNILARIA_OK"
     ],
-    # Grupo de câmeras e imagem digital
     ("mirella.trindade@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
         "CÂMERA_COLUNALD", "CÂMERA_COLUNALE", "CÂMERA_DEFLETORLD", "CÂMERA_DEFLETORLE",
         "CÂMERA_PARABRISA",
-        # Itens IMAGEM DIGITAL solicitados (devem existir no DOCX como {{...}})
         "CÂMERACOLUNA_LD", "CÂMERACOLUNA_LE", "CÂMERADEFLETOR_LD", "CÂMERADEFLETOR_LE"
     ],
     (
@@ -105,9 +284,6 @@ RESPONSAVEIS = {
     ],
 }
 
-# -------------------
-# FUNÇÕES AUXILIARES
-# -------------------
 def gerar_zip_imagens(imagens):
     """Cria um ZIP com as imagens da etapa 2"""
     buffer_zip = BytesIO()
@@ -117,252 +293,6 @@ def gerar_zip_imagens(imagens):
     buffer_zip.seek(0)
     return buffer_zip
 
-def obter_token_sharepoint():
-    """Obtém token de acesso para SharePoint usando Client Secret"""
-    try:
-        st.info("Obtendo token de acesso para SharePoint...")
-        authority = f"https://login.microsoftonline.com/{TENANT_ID}"
-        app = ConfidentialClientApplication(
-            client_id=CLIENT_ID,
-            client_credential=CLIENT_SECRET,
-            authority=authority
-        )
-        
-        # Escopo para SharePoint Online
-        scopes = ["https://graph.microsoft.com/.default"]
-        
-        result = app.acquire_token_for_client(scopes=scopes)
-        
-        if "access_token" in result:
-            st.success("Token obtido com sucesso!")
-            return result["access_token"]
-        else:
-            error_msg = result.get('error_description', str(result))
-            st.error(f"Erro ao obter token: {error_msg}")
-            
-            # Debug: Mostrar mais informações
-            st.error("Verifique:")
-            st.error("1. Se o Client ID está correto")
-            st.error("2. Se o Client Secret está correto no .env")
-            st.error("3. Se o Tenant ID está correto")
-            st.error("4. Se o App Registration tem permissões Sites.ReadWrite.All")
-            return None
-    except Exception as e:
-        st.error(f"Erro na autenticação: {str(e)}")
-        return None
-
-def get_site_id(access_token):
-    """Obtém o ID do site SharePoint"""
-    try:
-        # URL codificada para a API Graph
-        site_path = "/sites/ProTech"
-        encoded_site_path = urllib.parse.quote(site_path)
-        
-        graph_url = f"https://graph.microsoft.com/v1.0/sites/grupotransmaroni.sharepoint.com:{encoded_site_path}"
-        
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.get(graph_url, headers=headers)
-        
-        if response.status_code == 200:
-            site_data = response.json()
-            return site_data.get("id")
-        else:
-            st.error(f"Erro ao obter site ID: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Erro ao obter site ID: {str(e)}")
-        return None
-
-def get_list_id(access_token, site_id):
-    """Obtém o ID da lista pelo nome"""
-    try:
-        lists_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists"
-        
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.get(lists_url, headers=headers)
-        
-        if response.status_code == 200:
-            lists_data = response.json()
-            
-            # Procura a lista pelo nome
-            for lista in lists_data.get("value", []):
-                if lista.get("name") == SHAREPOINT_LIST_NAME or lista.get("displayName") == SHAREPOINT_LIST_NAME:
-                    return lista.get("id")
-            
-            st.error(f"Lista '{SHAREPOINT_LIST_NAME}' não encontrada")
-            st.error(f"Listas disponíveis: {[l.get('name') for l in lists_data.get('value', [])]}")
-            return None
-        else:
-            st.error(f"Erro ao obter listas: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"Erro ao obter list ID: {str(e)}")
-        return None
-
-def enviar_para_sharepoint(dados, fotos_nao_ok):
-    """Envia dados do checklist para lista do SharePoint"""
-    try:
-        st.info("Conectando ao SharePoint...")
-        
-        # 1. Obter token de acesso
-        access_token = obter_token_sharepoint()
-        if not access_token:
-            return False
-        
-        # 2. Obter Site ID
-        st.info("Obtendo Site ID...")
-        site_id = get_site_id(access_token)
-        if not site_id:
-            return False
-        
-        # 3. Obter List ID
-        st.info("Obtendo List ID...")
-        list_id = get_list_id(access_token, site_id)
-        if not list_id:
-            return False
-        
-        st.success(f"Site ID: {site_id[:50]}...")
-        st.success(f"List ID: {list_id}")
-        
-        # 4. Preparar dados para envio
-        st.info("Preparando dados para envio...")
-        
-        # Mapeamento dos campos do checklist para os field_N do SharePoint
-        item_data = {
-            "fields": {
-                "Title": dados.get("PLACA_CAMINHAO", ""),  # field_0/Title
-                "field_1": dados.get("OPERACAO", ""),      # OPERAÇÃO
-                "field_2": f"{dados.get('DATA', '')} {dados.get('HORA', '')}",  # DATA E HORA
-                "field_3": dados.get("PLACA_CAMINHAO", ""),  # PLACA CAMINHÃO 1
-                "field_4": dados.get("PLACA_CARRETA2", ""),  # PLACA CAMINHÃO 2 (BITREM?)
-                "field_5": calcular_tempo_execucao(),       # TIME EXECUÇÃO
-                "field_6": dados.get("MOTORISTA", ""),      # MOTORISTA
-                "field_7": dados.get("VISTORIADOR", ""),    # VISTORIADOR
-                "field_8": dados.get("KM_ATUAL", ""),       # KM ATUAL
-                "field_9": dados.get("TIPO_VEICULO", ""),   # TIPO DE VEÍCULO
-                "field_10": "2 EIXOS" if dados.get("CARRETA_2") == "X" else "3 EIXOS" if dados.get("CARRETA_3") == "X" else "",  # TIPO DE CARRETA
-                "field_11": dados.get("OBSERVACOES", ""),   # OBSERVAÇÃO
-                
-                # Checklist - mapeamento dos itens técnicos
-                "field_12": dados.get("ARREFECIMENTO_OK", "N/A"),  # NÍVEL DO LÍQUIDO DE ARREFECIMENTO
-                "field_13": dados.get("OLEO_MOTOR_OK", "N/A"),     # NÍVEL DE ÓLEO DE MOTOR
-                "field_14": dados.get("VAZAMENTO_OLEO_MOTOR", "N/A"),  # VAZAMENTO DE ÓLEO MOTOR
-                "field_15": dados.get("VAZAMENTO_AGUA_MOTOR", "N/A"),  # VAZAMENTO DE ÁGUA MOTOR
-                "field_16": dados.get("OLEO_CAMBIO_OK", "N/A"),    # VAZAMENTO DE ÓLEO CÂMBIO
-                "field_17": dados.get("OLEO_DIFERENCIAL_OK", "N/A"),  # VAZAMENTO DE ÓLEO DIFERENCIAL
-                "field_18": dados.get("OLEO_CUBOS_OK", "N/A"),     # VAZAMENTO DE ÓLEO CUBOS
-                "field_19": dados.get("DIESEL_OK", "N/A"),         # VAZAMENTO DE DIESEL
-                "field_20": dados.get("GNV_OK", "N/A"),            # VAZAMENTO DE GNV
-                "field_21": dados.get("VAZAMENTO_AR_OK", "N/A"),   # VAZAMENTO DE AR
-                "field_22": dados.get("PNEUS_OK", "N/A"),          # PNEUS AVARIADOS
-                "field_23": dados.get("FAIXAS_REFLETIVAS_OK", "N/A"),  # FAIXAS REFLETIVAS
-                "field_24": dados.get("FUNILARIA_OK", "N/A"),      # ITENS AVARIADOS PARA FUNILÁRIA
-                "field_25": dados.get("ILUMINACAO_OK", "N/A"),     # ILUMINAÇÃO
-                "field_26": dados.get("PARABRISA_OK", "N/A"),      # PARA-BRISA
-                "field_27": dados.get("FALHAS_PAINEL_OK", "N/A"),  # PRESENÇA DE FALHAS NO PAINEL
-                "field_28": dados.get("TACOGRAFO_OK", "N/A"),      # FUNCIONAMENTO TACÓGRAFO
-                "field_29": dados.get("CÂMERA_PARABRISA", "N/A"),  # CÂMERA DO PARABRISA
-                "field_30": dados.get("CÂMERA_COLUNALD", "N/A"),   # CÂMERA COLUNA LADO DIREITO
-                "field_31": dados.get("CÂMERA_COLUNALE", "N/A"),   # CÂMERA COLUNA LADO ESQUERDO
-                "field_32": dados.get("CÂMERA_DEFLETORLD", "N/A"), # CÂMERA DEFLETOR LADO DIREITO
-                "field_33": dados.get("CÂMERA_DEFLETORLE", "N/A"), # CÂMERA DEFLETOR LADO ESQUERDO
-                "field_34": dados.get("FUNCIONAMENTO_TK_OK", "N/A"),  # FUNCIONAMENTO TK
-                "field_35": dados.get("CÂMERACOLUNA_LD", "N/A"),   # IMAGEM DIGITAL CÂMERA COLUNA LD
-                "field_36": dados.get("CÂMERACOLUNA_LE", "N/A"),   # IMAGEM DIGITAL CÂMERA COLUNA LE
-                "field_37": dados.get("CÂMERADEFLETOR_LD", "N/A"), # IMAGEM DIGITAL CÂMERA DEFLETOR LD
-                "field_38": dados.get("CÂMERADEFLETOR_LE", "N/A"), # IMAGEM DIGITAL CÂMERA DEFLETOR LE
-                "field_39": dados.get("PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI", "N/A"),  # PARAFUSO SUSPENSÃO
-            }
-        }
-        
-        # 5. Criar item na lista
-        st.info("Enviando dados para a lista...")
-        create_item_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
-        
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(create_item_url, headers=headers, json=item_data)
-        
-        if response.status_code == 201:
-            item_id = response.json().get("id")
-            st.success(f"Dados enviados para SharePoint! ID do item: {item_id}")
-            
-            # 6. Enviar fotos como anexos
-            if fotos_nao_ok:
-                st.info("Enviando fotos como anexos...")
-                enviar_fotos_como_anexos(site_id, list_id, item_id, fotos_nao_ok, access_token)
-            
-            return True
-        else:
-            st.error(f"Erro ao criar item na lista: {response.status_code}")
-            st.error(f"Resposta: {response.text}")
-            st.error(f"URL usada: {create_item_url}")
-            return False
-            
-    except Exception as e:
-        st.error(f"Erro ao enviar para SharePoint: {str(e)}")
-        import traceback
-        st.error(f"Traceback: {traceback.format_exc()}")
-        return False
-
-def enviar_fotos_como_anexos(site_id, list_id, item_id, fotos_nao_ok, access_token):
-    """Envia fotos dos itens NÃO OK como anexos do item do SharePoint"""
-    try:
-        anexos_enviados = 0
-        
-        for item_nome, fotos in fotos_nao_ok.items():
-            if fotos:
-                arquivos = fotos if isinstance(fotos, list) else [fotos]
-                for idx, foto in enumerate(arquivos, start=1):
-                    # URL para upload do anexo
-                    upload_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items/{item_id}/attachments"
-                    
-                    # Criar o conteúdo do arquivo
-                    file_content = foto.getvalue()
-                    file_name = f"{item_nome}_{idx}.jpg"
-                    
-                    # Criar corpo da requisição para anexo
-                    attachment_data = {
-                        "name": file_name,
-                        "contentBytes": file_content.hex()  # Converter para hex para Graph API
-                    }
-                    
-                    # Headers para upload
-                    headers = {
-                        "Authorization": f"Bearer {access_token}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    # Fazer upload do arquivo
-                    response = requests.post(
-                        upload_url,
-                        headers=headers,
-                        json=attachment_data
-                    )
-                    
-                    if response.status_code == 201:
-                        anexos_enviados += 1
-                    else:
-                        st.warning(f"Erro ao enviar anexo {file_name}: {response.status_code} - {response.text}")
-        
-        if anexos_enviados > 0:
-            st.success(f"{anexos_enviados} fotos enviadas como anexos")
-                        
-    except Exception as e:
-        st.warning(f"Erro ao enviar fotos como anexos: {str(e)}")
-
-# Mapeamento de e-mails das operações
 EMAILS_OPERACOES = {
     "MERCADO - LIVRE": ["meli.operacional@transmaroni.com.br", "programacaoecommerce@transmaroni.com.br", "lucas.alves@transmaroni.com.br"],
     "BITREM": ["bitremgrupo@transmaroni.com.br"],
@@ -372,11 +302,10 @@ EMAILS_OPERACOES = {
 }
 
 def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, buffer_word, buffer_zip):
-    """Envia os e-mails para os responsáveis de cada item com Word, ZIP e fotos dos itens"""
+    """Envia os e-mails para os responsáveis de cada item"""
     hora_atual = datetime.now().hour
     saudacao = "Bom dia" if hora_atual < 12 else "Boa tarde"
 
-    # Adiciona e-mails das operações conforme selecionado
     operacao = st.session_state.dados.get("OPERACAO", "")
     emails_operacao = EMAILS_OPERACOES.get(operacao, [])
 
@@ -385,7 +314,6 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
         if not itens_do_grupo:
             continue
 
-        # Junta os e-mails do grupo com os da operação (sem duplicar)
         todos_destinatarios = list(set(destinatarios + tuple(emails_operacao)))
 
         msg = EmailMessage()
@@ -413,7 +341,7 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
             filename="Ficha_Tecnica.docx"
         )
 
-        # Anexar ZIP das fotos da etapa 2
+        # Anexar ZIP das fotos
         msg.add_attachment(
             buffer_zip.getvalue(),
             maintype="application",
@@ -421,7 +349,7 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
             filename="Fotos_Checklist.zip"
         )
 
-        # Anexar fotos dos itens NÃO OK (somente os do grupo)
+        # Anexar fotos dos itens NÃO OK
         for item in itens_do_grupo:
             if item in fotos_nao_ok:
                 arquivos = fotos_nao_ok[item]
@@ -443,6 +371,137 @@ def enviar_emails_personalizados(itens_nao_ok, fotos_nao_ok, checklist_itens, bu
         except Exception as e:
             st.error(f"Erro ao enviar e-mail para {todos_destinatarios}: {e}")
 
+def enviar_para_sharepoint():
+    """Envia os dados do checklist para a lista do SharePoint"""
+    try:
+        token_info = st.session_state.access_token_info
+        if not token_info:
+            return False
+        
+        access_token = token_info["access_token"]
+        
+        # Mapeamento dos campos para SharePoint
+        checklist_itens_mapping = {
+            "OPERACAO": "field_1",
+            "DATA": "field_2",
+            "HORA": "field_2",
+            "PLACA_CAMINHAO": "field_3",
+            "PLACA_CARRETA2": "field_4",
+            "TEMPO_EXECUCAO": "field_5",
+            "MOTORISTA": "field_6",
+            "VISTORIADOR": "field_7",
+            "KM_ATUAL": "field_8",
+            "TIPO_VEICULO": "field_9",
+            "TIPO_CARRETA": "field_10",
+            "OBSERVACOES": "field_11",
+            "VAZAMENTO_OLEO_MOTOR": "field_12",
+            "VAZAMENTO_AGUA_MOTOR": "field_13",
+            "FUNILARIA_OK": "field_14",
+            "CÂMERA_COLUNALE": "field_15",
+            "CÂMERA_DEFLETORLD": "field_16",
+            "CÂMERA_COLUNALD": "field_17",
+            "OLEO_MOTOR_OK": "field_18",
+            "TACOGRAFO_OK": "field_19",
+            "FUNCIONAMENTO_TK_OK": "field_20",
+            "FALHAS_PAINEL_OK": "field_21",
+            "FAIXAS_REFLETIVAS_OK": "field_22",
+            "ILUMINACAO_OK": "field_23",
+            "PNEUS_OK": "field_24",
+            "PARABRISA_OK": "field_25",
+            "VAZAMENTO_AR_OK": "field_26",
+            "OLEO_DIFERENCIAL_OK": "field_27",
+            "OLEO_CUBOS_OK": "field_28",
+            "GNV_OK": "field_29",
+            "DIESEL_OK": "field_30",
+            "CÂMERA_DEFLETORLE": "field_31",
+            "CÂMERADEFLETOR_LE": "field_32",
+            "CÂMERADEFLETOR_LD": "field_33",
+            "CÂMERACOLUNA_LE": "field_34",
+            "CÂMERACOLUNA_LD": "field_35",
+            "CÂMERA_PARABRISA": "field_36",
+            "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI": "field_37",
+            "ARREFECIMENTO_OK": "field_38",
+            "OLEO_CAMBIO_OK": "field_39",
+        }
+        
+        # Determinar tipo de carreta
+        tipo_carreta = ""
+        if st.session_state.dados.get("CARRETA_2") == "X":
+            tipo_carreta = "2 EIXOS"
+        elif st.session_state.dados.get("CARRETA_3") == "X":
+            tipo_carreta = "3 EIXOS"
+        
+        # Formatar DATA/HORA no formato ISO
+        data_str = f"{st.session_state.dados.get('DATA', '')} {st.session_state.dados.get('HORA', '')}"
+        try:
+            dt_obj = datetime.strptime(data_str, "%d/%m/%Y %H:%M")
+            data_iso = dt_obj.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            data_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        # Formatar KM ATUAL como número
+        km_str = str(st.session_state.dados.get('KM_ATUAL', '0')).strip()
+        try:
+            km_limpo = km_str.replace('.', '').replace(',', '.')
+            km_numero = float(km_limpo)
+        except:
+            km_numero = 0
+        
+        # Tempo de execução
+        tempo_exec = calcular_tempo_execucao()
+        
+        # Construir payload
+        fields_data = {
+            "Title": st.session_state.dados.get('PLACA_CAMINHAO', 'N/A'),
+            "field_1": st.session_state.dados.get('OPERACAO', ''),
+            "field_2": data_iso,
+            "field_3": st.session_state.dados.get('PLACA_CAMINHAO', ''),
+            "field_4": st.session_state.dados.get('PLACA_CARRETA2', ''),
+            "field_5": tempo_exec,
+            "field_6": st.session_state.dados.get('MOTORISTA', ''),
+            "field_7": st.session_state.dados.get('VISTORIADOR', ''),
+            "field_8": km_numero,
+            "field_9": st.session_state.dados.get('TIPO_VEICULO', ''),
+            "field_10": tipo_carreta,
+            "field_11": st.session_state.dados.get('OBSERVACOES', ''),
+        }
+        
+        # Adicionar itens do checklist
+        for checklist_key, sharepoint_field in checklist_itens_mapping.items():
+            if sharepoint_field.startswith('field_'):
+                try:
+                    field_num = int(sharepoint_field.split('_')[1])
+                    if field_num >= 12:
+                        status = st.session_state.dados.get(checklist_key, "")
+                        if status:
+                            fields_data[sharepoint_field] = status
+                except:
+                    continue
+        
+        # Remover campos vazios
+        fields_data_filtrado = {k: v for k, v in fields_data.items() if v not in ["", None]}
+        
+        # Enviar para SharePoint
+        payload_graph = {"fields": fields_data_filtrado}
+        graph_url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/lists/{LIST_ID}/items"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            graph_url,
+            headers=headers,
+            json=payload_graph,
+            timeout=30
+        )
+        
+        return response.status_code in [200, 201]
+            
+    except Exception as e:
+        return False
+
 def calcular_tempo_execucao():
     """Calcula o tempo de execução do checklist"""
     if "start_time" in st.session_state:
@@ -452,8 +511,12 @@ def calcular_tempo_execucao():
         return f"{minutos:02d}:{segundos_restantes:02d}"
     return "N/A"
 
+# =========================================================
+# ETAPAS DO CHECKLIST (INTERFACE ORIGINAL)
+# =========================================================
+
 # -------------------
-# ETAPA 1
+# ETAPA 1 - DADOS DO VEÍCULO (MANTIDA ORIGINAL)
 # -------------------
 if st.session_state.etapa == 1:
     st.subheader("Dados do Veículo e Condutor")
@@ -555,7 +618,7 @@ if st.session_state.etapa == 1:
             st.warning("Preencha todos os campos obrigatórios.")
 
 # -------------------
-# ETAPA 2
+# ETAPA 2 - FOTOS (MANTIDA ORIGINAL)
 # -------------------
 elif st.session_state.etapa == 2:
     st.subheader("Inserção das Imagens")
@@ -580,7 +643,7 @@ elif st.session_state.etapa == 2:
             st.warning("Envie no mínimo 4 imagens.")
 
 # -------------------
-# ETAPA 3
+# ETAPA 3 - CHECKLIST (MANTIDA ORIGINAL COM FLUXO AUTOMÁTICO)
 # -------------------
 elif st.session_state.etapa == 3:
     st.subheader("Etapa 3: Checklist")
@@ -634,7 +697,7 @@ elif st.session_state.etapa == 3:
             if fotos:
                 st.session_state.fotos_nao_ok[chave] = fotos
 
-    # Campo OBSERVAÇÕES solicitado
+    # Campo OBSERVAÇÕES
     st.session_state.dados["OBSERVACOES"] = st.text_area("Observações", placeholder="Digite informações adicionais, se necessário.")
 
     if "finalizando" not in st.session_state:
@@ -649,7 +712,7 @@ elif st.session_state.etapa == 3:
         st.session_state.finalizando = True
         with st.spinner("Finalizando checklist..."):
             try:
-                # ===== Gera Word a partir do template =====
+                # ===== Gera Word =====
                 doc = Document("Ficha Técnica.docx")
                 for p in doc.paragraphs:
                     for k, v in st.session_state.dados.items():
@@ -669,19 +732,13 @@ elif st.session_state.etapa == 3:
                 doc.save(buffer_word)
                 buffer_word.seek(0)
 
-                # ZIP das fotos etapa 2
+                # ZIP das fotos
                 buffer_zip = gerar_zip_imagens(st.session_state.imagens)
 
-                # Itens NÃO OK (para e-mails)
+                # Itens NÃO OK
                 itens_nao_ok = [k for k, v in st.session_state.dados.items() if v == "NÃO OK"]
 
-                # 1. Envia dados para SharePoint
-                sucesso_sharepoint = enviar_para_sharepoint(
-                    st.session_state.dados, 
-                    st.session_state.fotos_nao_ok
-                )
-                
-                # 2. Envia e-mails para os responsáveis pelos itens (mantém funcionalidade existente)
+                # Envia e-mails
                 enviar_emails_personalizados(
                     itens_nao_ok,
                     st.session_state.fotos_nao_ok,
@@ -690,14 +747,23 @@ elif st.session_state.etapa == 3:
                     buffer_zip
                 )
                 
-                if sucesso_sharepoint:
-                    st.success("Checklist concluído! Dados enviados para SharePoint e e-mails enviados para os responsáveis.")
+                # ENVIO PARA SHAREPOINT
+                enviou_sharepoint = enviar_para_sharepoint()
+                
+                if enviou_sharepoint:
+                    st.success("✅ Checklist concluído e enviado para SharePoint!")
                 else:
-                    st.warning("Checklist concluído e e-mails enviados, mas houve problema com SharePoint.")
+                    st.warning("Checklist concluído, mas houve problema ao enviar para SharePoint.")
 
-                time.sleep(2)
-                st.session_state.clear()
-                st.session_state.etapa = 1
+                # ⭐⭐ NOVO: AGUARDAR E VOLTAR AUTOMATICAMENTE ⭐⭐
+                time.sleep(3)
+                
+                # LIMPA APENAS DADOS DO CHECKLIST, MANTÉM AUTENTICAÇÃO
+                for key in ["etapa", "dados", "imagens", "fotos_nao_ok", "start_time", "finalizando"]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
+                # VOLTA PARA ETAPA 1 AUTOMATICAMENTE
                 st.rerun()
 
             except Exception as e:
