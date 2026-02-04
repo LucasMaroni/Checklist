@@ -40,6 +40,14 @@ TENANT_ID = os.getenv("AZURE_TENANT_ID")
 SCOPES = ["https://graph.microsoft.com/.default"]
 
 # =========================================================
+# NOVO: CONFIGURAÇÃO PASTA SHAREPOINT
+# =========================================================
+# Nome da pasta onde serão armazenados os documentos Word
+SHAREPOINT_DOCS_FOLDER = "Checklists de Manutenção"
+# ID do drive (pode ser obtido via API Graph)
+SHAREPOINT_DRIVE_ID = os.getenv("SHAREPOINT_DRIVE_ID", "")  # Opcional: configurar no .env
+
+# =========================================================
 # FUNÇÕES DE AUTENTICAÇÃO PERSISTENTE (SIMPLIFICADA)
 # =========================================================
 
@@ -94,6 +102,103 @@ def token_valido(token_info):
     expires_at = token_info.get("expires_at", 0)
     # Considerar token válido se expira em mais de 5 minutos
     return time.time() < (expires_at - 300)
+
+# =========================================================
+# NOVAS FUNÇÕES PARA ENVIO DE DOCUMENTOS AO SHAREPOINT
+# =========================================================
+
+def criar_pasta_sharepoint(access_token, nome_pasta=SHAREPOINT_DOCS_FOLDER):
+    """
+    Cria a pasta no SharePoint se não existir
+    Retorna o ID da pasta
+    """
+    try:
+        # URL para criar pasta no drive do site
+        if SHAREPOINT_DRIVE_ID:
+            url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives/{SHAREPOINT_DRIVE_ID}/root/children"
+        else:
+            # Usar drive padrão do site
+            url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/root/children"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Verificar se pasta já existe
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            items = response.json().get("value", [])
+            for item in items:
+                if item.get("name") == nome_pasta and item.get("folder"):
+                    return item.get("id")  # Retorna ID da pasta existente
+        
+        # Se não existe, criar a pasta
+        payload = {
+            "name": nome_pasta,
+            "folder": {},
+            "@microsoft.graph.conflictBehavior": "rename"
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        if response.status_code in [200, 201]:
+            return response.json().get("id")
+        else:
+            st.warning(f"Não foi possível criar pasta: {response.text}")
+            return None
+            
+    except Exception as e:
+        st.warning(f"Erro ao criar pasta no SharePoint: {e}")
+        return None
+
+def enviar_documento_sharepoint(access_token, buffer_word, placa, data_hora):
+    """
+    Envia o documento Word para a pasta do SharePoint
+    Retorna True se enviado com sucesso
+    """
+    try:
+        # Obter ou criar ID da pasta
+        folder_id = criar_pasta_sharepoint(access_token)
+        if not folder_id:
+            return False
+        
+        # Criar nome do arquivo com placa e timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        nome_arquivo = f"{placa}_{timestamp}.docx"
+        
+        # Remover caracteres inválidos do nome do arquivo
+        nome_arquivo = re.sub(r'[<>:"/\\|?*]', '_', nome_arquivo)
+        
+        # URL para upload do arquivo
+        if SHAREPOINT_DRIVE_ID:
+            url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drives/{SHAREPOINT_DRIVE_ID}/items/{folder_id}:/{nome_arquivo}:/content"
+        else:
+            url = f"https://graph.microsoft.com/v1.0/sites/{SITE_ID}/drive/items/{folder_id}:/{nome_arquivo}:/content"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        }
+        
+        # Fazer upload do arquivo
+        buffer_word.seek(0)  # Garantir que estamos no início do buffer
+        response = requests.put(
+            url, 
+            headers=headers, 
+            data=buffer_word.getvalue(),
+            timeout=60
+        )
+        
+        if response.status_code in [200, 201]:
+            st.success(f"✅ Documento salvo no SharePoint: {nome_arquivo}")
+            return True
+        else:
+            st.warning(f"❌ Falha ao enviar documento: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        st.warning(f"❌ Erro ao enviar documento para SharePoint: {e}")
+        return False
 
 # =========================================================
 # INTERFACE DE LOGIN SIMPLIFICADA
@@ -179,9 +284,9 @@ def mostrar_tela_codigo():
                 const textArea = document.createElement("textarea");
                 textArea.value = "{user_code}";
                 document.body.appendChild(textArea);
-                textArea.select();
-                document.execCommand("copy");
-                document.body.removeChild(textArea);
+                        textArea.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(textArea);
             }}
             </script>
             """
@@ -367,7 +472,7 @@ RESPONSAVEIS = {
     ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
         "TACOGRAFO_OK"
     ],
-    ("wesley.assumpcao@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", "bruna.silva@transmaroni.com.br", "alex.franca@transmaroni.com.br", ): [
+    ("wesley.assumpcao@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
         "FUNILARIA_OK"
     ],
     ("mirella.trindade@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
@@ -381,7 +486,6 @@ RESPONSAVEIS = {
         "michele.silva@transmaroni.com.br",
         "enielle.argolo@transmaroni.com.br",
         "jose.oliveira@transmaroni.com.br",
-        "eric.souza@transmaroni.com.br",
     ): [
         "PARAFUSO_SUSPENSAO_VANDERLEIA_FACCHINI"
     ],
@@ -850,13 +954,42 @@ elif st.session_state.etapa == 3:
                     buffer_zip
                 )
                 
-                # ENVIO PARA SHAREPOINT
-                enviou_sharepoint = enviar_para_sharepoint()
+                # ===== NOVO: ENVIAR DOCUMENTO WORD PARA SHAREPOINT =====
+                placa = st.session_state.dados.get('PLACA_CAMINHAO', '')
+                data_hora = f"{st.session_state.dados.get('DATA', '')}_{st.session_state.dados.get('HORA', '').replace(':', '')}"
                 
-                if enviou_sharepoint:
-                    st.success("✅ Checklist concluído e enviado para SharePoint!")
+                # Criar uma cópia do buffer para enviar ao SharePoint
+                buffer_word_sharepoint = BytesIO()
+                buffer_word.seek(0)
+                buffer_word_sharepoint.write(buffer_word.getvalue())
+                buffer_word_sharepoint.seek(0)
+                
+                token_info = st.session_state.access_token_info
+                if token_info:
+                    enviado_sharepoint_doc = enviar_documento_sharepoint(
+                        token_info["access_token"],
+                        buffer_word_sharepoint,
+                        placa,
+                        data_hora
+                    )
                 else:
-                    st.warning("Checklist concluído, mas houve problema ao enviar para SharePoint.")
+                    enviado_sharepoint_doc = False
+                    st.warning("❌ Token de acesso não disponível para enviar ao SharePoint")
+                
+                # ENVIO PARA LISTA DO SHAREPOINT (original)
+                enviou_sharepoint_lista = enviar_para_sharepoint()
+                
+                # Mensagens de sucesso
+                mensagens = []
+                if enviou_sharepoint_lista:
+                    mensagens.append("✅ Checklist Registrado com Sucesso")
+                if enviado_sharepoint_doc:
+                    mensagens.append("✅ Documento Word Salvo")
+                
+                if mensagens:
+                    st.success("\n".join(mensagens))
+                else:
+                    st.warning("⚠️ Checklist concluído, mas houve problema ao enviar para SharePoint.")
 
                 # ⭐⭐ NOVO: AGUARDAR E VOLTAR AUTOMATICAMENTE ⭐⭐
                 time.sleep(3)
