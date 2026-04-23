@@ -469,7 +469,7 @@ RESPONSAVEIS = {
     ("henrique.araujo@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "manutencao.frota@transmaroni.com.br",): [
         "FUNCIONAMENTO_TK_OK"
     ],
-    ("sandra.silva@transmaroni.com.br", "amanda.soares@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
+    ("manutencao.frota@transmaroni.com.br", ): [
         "TACOGRAFO_OK"
     ],
     ("wesley.assumpcao@transmaroni.com.br", "manutencao.frota@transmaroni.com.br", ): [
